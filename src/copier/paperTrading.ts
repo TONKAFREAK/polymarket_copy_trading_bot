@@ -27,6 +27,9 @@ export interface PaperPosition {
   unrealizedPnl?: number;
   openedAt: number;
   resolved?: boolean; // True if market has expired/resolved
+  settled?: boolean; // True if P&L has been realized from resolution
+  settlementPrice?: number; // 1.0 if won, 0.0 if lost
+  settlementPnl?: number; // Final P&L from resolution
 }
 
 export interface PaperTrade {
@@ -242,6 +245,7 @@ export class PaperTradingManager {
     this.saveState();
 
     logger.info("Paper trade executed", {
+      type: signal.activityType || "TRADE",
       side: signal.side,
       shares: order.size,
       price: order.price,
@@ -375,35 +379,180 @@ export class PaperTradingManager {
   }
 
   /**
+   * Settle resolved positions - calculate final P&L based on market resolution
+   * In Polymarket: winning shares pay $1.00, losing shares pay $0.00
+   */
+  async settleResolvedPositions(): Promise<{
+    settled: number;
+    totalPnl: number;
+    wins: number;
+    losses: number;
+  }> {
+    const gammaApi = getGammaApiClient();
+    let settledCount = 0;
+    let totalSettlementPnl = 0;
+    let wins = 0;
+    let losses = 0;
+
+    for (const [tokenId, position] of Object.entries(this.state.positions)) {
+      // Skip if already settled or no shares
+      if (position.settled || position.shares === 0) continue;
+
+      try {
+        // Check if market is resolved
+        const resolution = await gammaApi.getMarketResolution(position.marketSlug);
+
+        if (!resolution.resolved) {
+          continue; // Market not resolved yet
+        }
+
+        // Determine if this position won or lost
+        // For a BUY position on YES: wins if YES won (outcome price = 1)
+        // For a BUY position on NO: wins if NO won (outcome price = 1)
+        const outcomeIndex = position.outcome === "YES" ? 0 : 1;
+        const settlementPrice = resolution.outcomePrices[outcomeIndex] ?? 0;
+
+        // Calculate P&L
+        // Settlement value = shares * settlement price ($1 if won, $0 if lost)
+        // P&L = settlement value - cost basis
+        const settlementValue = position.shares * settlementPrice;
+        const costBasis = position.totalCost;
+        const pnl = settlementValue - costBasis;
+
+        // Update position
+        position.resolved = true;
+        position.settled = true;
+        position.settlementPrice = settlementPrice;
+        position.settlementPnl = pnl;
+
+        // Add settlement value to balance (winning positions pay out)
+        this.state.currentBalance += settlementValue;
+
+        // Update stats
+        this.state.stats.totalRealizedPnl += pnl;
+        if (pnl > 0) {
+          wins++;
+          this.state.stats.winningTrades++;
+          if (pnl > this.state.stats.largestWin) {
+            this.state.stats.largestWin = pnl;
+          }
+        } else if (pnl < 0) {
+          losses++;
+          this.state.stats.losingTrades++;
+          if (pnl < this.state.stats.largestLoss) {
+            this.state.stats.largestLoss = pnl;
+          }
+        }
+
+        // Zero out position shares (position is closed)
+        position.shares = 0;
+
+        settledCount++;
+        totalSettlementPnl += pnl;
+
+        logger.info("Position settled", {
+          market: position.marketSlug,
+          outcome: position.outcome,
+          won: settlementPrice >= 0.99,
+          pnl: pnl.toFixed(2),
+          settlementValue: settlementValue.toFixed(2),
+        });
+      } catch (error) {
+        logger.debug("Failed to settle position", {
+          tokenId,
+          market: position.marketSlug,
+          error: (error as Error).message,
+        });
+      }
+    }
+
+    // Update win rate
+    const totalClosedTrades = this.state.stats.winningTrades + this.state.stats.losingTrades;
+    this.state.stats.winRate = totalClosedTrades > 0
+      ? (this.state.stats.winningTrades / totalClosedTrades) * 100
+      : 0;
+
+    // Calculate profit factor
+    const totalWins = Object.values(this.state.positions)
+      .filter((p) => p.settlementPnl && p.settlementPnl > 0)
+      .reduce((sum, p) => sum + (p.settlementPnl || 0), 0);
+    const totalLosses = Math.abs(
+      Object.values(this.state.positions)
+        .filter((p) => p.settlementPnl && p.settlementPnl < 0)
+        .reduce((sum, p) => sum + (p.settlementPnl || 0), 0)
+    );
+    this.state.stats.profitFactor = totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? Infinity : 0;
+
+    this.saveState();
+
+    return { settled: settledCount, totalPnl: totalSettlementPnl, wins, losses };
+  }
+
+  /**
    * Update position prices and unrealized PnL
+   * Also checks for and settles resolved markets
    */
   async updatePrices(): Promise<void> {
     let totalUnrealizedPnl = 0;
 
+    // First, settle any resolved positions
+    const settlement = await this.settleResolvedPositions();
+    if (settlement.settled > 0) {
+      logger.info("Settled resolved positions", {
+        count: settlement.settled,
+        pnl: settlement.totalPnl.toFixed(2),
+        wins: settlement.wins,
+        losses: settlement.losses,
+      });
+    }
+
     for (const [_tokenId, position] of Object.entries(this.state.positions)) {
-      if (position.shares === 0) continue;
+      if (position.shares === 0 || position.settled) continue;
 
       try {
         // Try to get current price from Gamma API
         const gammaApi = getGammaApiClient();
         const market = await gammaApi.getMarketBySlug(position.marketSlug);
         if (market) {
-          // Estimate current price (this is simplified - real implementation would get orderbook)
-          // For now, just use stored price or entry price
-          const currentPrice = position.currentPrice || position.avgEntryPrice;
+          // Check if market is now closed
+          if (market.closed) {
+            position.resolved = true;
+            // Will be settled on next call
+            continue;
+          }
+
+          // Get current price from market tokens
+          let currentPrice = position.avgEntryPrice;
+          if (market.tokens && market.tokens.length > 0) {
+            const outcomeIndex = position.outcome === "YES" ? 0 : 1;
+            if (market.tokens[outcomeIndex]) {
+              currentPrice = market.tokens[outcomeIndex].price || currentPrice;
+            }
+          }
+          // Also try parsing outcomePrices if available
+          if (market.outcomePrices) {
+            try {
+              const prices = market.outcomePrices.startsWith("[")
+                ? JSON.parse(market.outcomePrices)
+                : market.outcomePrices.split(",").map((p: string) => parseFloat(p));
+              const outcomeIndex = position.outcome === "YES" ? 0 : 1;
+              if (prices[outcomeIndex] !== undefined) {
+                currentPrice = prices[outcomeIndex];
+              }
+            } catch {
+              // Use token price
+            }
+          }
+
           position.currentPrice = currentPrice;
 
           if (position.shares > 0) {
-            position.unrealizedPnl =
-              (currentPrice - position.avgEntryPrice) * position.shares;
-          } else {
-            // Short position
-            position.unrealizedPnl =
-              (position.avgEntryPrice - currentPrice) *
-              Math.abs(position.shares);
+            // Long position: value = shares * currentPrice, cost = totalCost
+            const currentValue = position.shares * currentPrice;
+            position.unrealizedPnl = currentValue - position.totalCost;
           }
 
-          totalUnrealizedPnl += position.unrealizedPnl;
+          totalUnrealizedPnl += position.unrealizedPnl || 0;
         } else {
           // Market not found - likely expired/resolved, mark as needing settlement
           position.resolved = true;

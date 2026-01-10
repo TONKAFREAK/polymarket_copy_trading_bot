@@ -10,6 +10,9 @@ import { getEnvConfig, validateEnvConfig, ensureDataDir } from "../config/env";
 import { SizingMode } from "../copier/types";
 
 export function createInitCommand(): Command {
+  // Get env config to use as defaults
+  const env = getEnvConfig();
+  
   const command = new Command("init")
     .description("Initialize the Polymarket copy trader configuration")
     .option(
@@ -19,24 +22,49 @@ export function createInitCommand(): Command {
     .option(
       "-m, --mode <mode>",
       "Sizing mode: fixed_usd, fixed_shares, proportional",
-      "fixed_usd"
+      env.sizingMode
     )
     .option(
       "-u, --usd <amount>",
       "USD amount per trade (for fixed_usd mode)",
-      "10"
+      String(env.defaultUsdSize)
     )
     .option(
       "-s, --shares <amount>",
       "Shares per trade (for fixed_shares mode)",
-      "10"
+      String(env.defaultSharesSize)
     )
     .option(
       "--slippage <percent>",
       "Slippage tolerance (e.g., 0.01 for 1%)",
-      "0.01"
+      String(env.slippage)
     )
-    .option("-d, --dry-run", "Enable dry-run mode (no real trades)", true)
+    .option(
+      "--multiplier <ratio>",
+      "Proportional multiplier (e.g., 0.25 for 25%)",
+      String(env.proportionalMultiplier)
+    )
+    .option(
+      "--max-usd-per-trade <amount>",
+      "Maximum USD per single trade",
+      String(env.maxUsdPerTrade)
+    )
+    .option(
+      "--max-usd-per-market <amount>",
+      "Maximum USD exposure per market",
+      String(env.maxUsdPerMarket)
+    )
+    .option(
+      "--max-daily-volume <amount>",
+      "Maximum daily USD trading volume",
+      String(env.maxDailyUsdVolume)
+    )
+    .option(
+      "--poll-interval <ms>",
+      "Polling interval in milliseconds",
+      String(env.pollIntervalMs)
+    )
+    .option("-d, --dry-run", "Enable dry-run mode (no real trades)", env.dryRun)
     .option("--no-dry-run", "Disable dry-run mode (live trading)")
     .option("-f, --force", "Force reinitialize (overwrite existing config)")
     .action(async (options) => {
@@ -44,8 +72,8 @@ export function createInitCommand(): Command {
 
       try {
         // Validate environment
-        const env = getEnvConfig();
-        const validation = validateEnvConfig(env);
+        const envConfig = getEnvConfig();
+        const validation = validateEnvConfig(envConfig);
 
         if (!validation.valid && !options.dryRun) {
           spinner.fail("Environment validation failed");
@@ -62,10 +90,10 @@ export function createInitCommand(): Command {
         }
 
         // Ensure data directory exists
-        ensureDataDir(env.dataDir);
+        ensureDataDir(envConfig.dataDir);
 
         // Initialize config
-        const configManager = getConfigManager(env.dataDir);
+        const configManager = getConfigManager(envConfig.dataDir);
 
         // Parse targets
         const targets: string[] = options.targets
@@ -85,13 +113,18 @@ export function createInitCommand(): Command {
           process.exit(1);
         }
 
-        // Initialize configuration
-        configManager.initialize({
+        // Initialize configuration with all options
+        configManager.initializeFull({
           targets,
           sizingMode,
-          usd: parseFloat(options.usd),
-          shares: parseFloat(options.shares),
+          fixedUsdSize: parseFloat(options.usd),
+          fixedSharesSize: parseFloat(options.shares),
+          proportionalMultiplier: parseFloat(options.multiplier),
           slippage: parseFloat(options.slippage),
+          maxUsdPerTrade: parseFloat(options.maxUsdPerTrade),
+          maxUsdPerMarket: parseFloat(options.maxUsdPerMarket),
+          maxDailyUsdVolume: parseFloat(options.maxDailyVolume),
+          pollIntervalMs: parseInt(options.pollInterval),
           dryRun: options.dryRun,
         });
 
@@ -99,7 +132,7 @@ export function createInitCommand(): Command {
 
         // Display configuration summary
         console.log("\n" + chalk.bold("Configuration Summary:"));
-        console.log(chalk.gray("─".repeat(40)));
+        console.log(chalk.gray("─".repeat(50)));
 
         console.log(
           `  ${chalk.cyan("Targets:")} ${
@@ -118,6 +151,8 @@ export function createInitCommand(): Command {
           console.log(`  ${chalk.cyan("USD per Trade:")} $${options.usd}`);
         } else if (sizingMode === "fixed_shares") {
           console.log(`  ${chalk.cyan("Shares per Trade:")} ${options.shares}`);
+        } else if (sizingMode === "proportional") {
+          console.log(`  ${chalk.cyan("Proportional Multiplier:")} ${(parseFloat(options.multiplier) * 100).toFixed(0)}%`);
         }
 
         console.log(
@@ -125,15 +160,32 @@ export function createInitCommand(): Command {
             parseFloat(options.slippage) * 100
           ).toFixed(1)}%`
         );
+        
+        console.log(chalk.gray("\n  Risk Limits:"));
+        const maxTrade = parseFloat(options.maxUsdPerTrade);
+        const maxMarket = parseFloat(options.maxUsdPerMarket);
+        const maxDaily = parseFloat(options.maxDailyVolume);
+        console.log(`    ${chalk.cyan("Max USD/Trade:")} $${maxTrade > 1e9 ? "unlimited" : maxTrade.toLocaleString()}`);
+        console.log(`    ${chalk.cyan("Max USD/Market:")} $${maxMarket > 1e9 ? "unlimited" : maxMarket.toLocaleString()}`);
+        console.log(`    ${chalk.cyan("Max Daily Volume:")} $${maxDaily > 1e9 ? "unlimited" : maxDaily.toLocaleString()}`);
+        
+        console.log(chalk.gray("\n  Polling:"));
+        console.log(`    ${chalk.cyan("Interval:")} ${options.pollInterval}ms`);
+        
         console.log(
-          `  ${chalk.cyan("Dry Run:")} ${
+          `\n  ${chalk.cyan("Mode:")} ${
             options.dryRun
-              ? chalk.green("Enabled (no real trades)")
-              : chalk.red("Disabled (LIVE TRADING)")
+              ? chalk.green("DRY RUN (no real trades)")
+              : envConfig.paperTrading
+              ? chalk.yellow("PAPER TRADING (simulated)")
+              : chalk.red("LIVE TRADING (real money!)")
           }`
         );
 
-        console.log(chalk.gray("─".repeat(40)));
+        console.log(chalk.gray("─".repeat(50)));
+
+        // Show env source info
+        console.log(chalk.gray("\n  (Defaults loaded from .env file)"));
 
         // Show next steps
         console.log("\n" + chalk.bold("Next Steps:"));
@@ -156,7 +208,7 @@ export function createInitCommand(): Command {
         );
 
         // Warning banner
-        if (!options.dryRun) {
+        if (!options.dryRun && !envConfig.paperTrading) {
           console.log("\n" + chalk.bgRed.white.bold(" ⚠️  WARNING "));
           console.log(
             chalk.red("Live trading is enabled! Real money will be used.")

@@ -1,14 +1,45 @@
 /**
  * Trade Watcher - polls target wallets for new trades
+ * Includes trade aggregation to prevent over-trading when target makes rapid micro-trades
  */
 
-import { TradeSignal, PollingConfig } from "./types";
+import { TradeSignal, PollingConfig, ActivityType } from "./types";
 import { DataApiClient, getDataApiClient } from "../polymarket/dataApi";
 import { StateManager, getStateManager } from "./state";
 import { getLogger, logTradeDetected } from "../utils/logger";
 import { sleep } from "../utils/http";
 
 const logger = getLogger();
+
+// ============================================
+// TRADE AGGREGATION
+// ============================================
+
+/**
+ * Aggregated trade - groups rapid trades on same token+side+activityType
+ */
+interface AggregatedTrade {
+  tokenId: string;
+  side: "BUY" | "SELL";
+  activityType: ActivityType;
+  targetWallet: string;
+  trades: TradeSignal[];
+  totalShares: number;
+  totalNotionalUsd: number;
+  avgPrice: number;
+  firstTimestamp: number;
+  lastTimestamp: number;
+}
+
+/**
+ * Pending aggregation buffer
+ */
+interface AggregationBuffer {
+  [key: string]: AggregatedTrade; // key = tokenId:side
+}
+
+// Aggregation window in milliseconds (5 seconds)
+const AGGREGATION_WINDOW_MS = 5000;
 
 export interface WatcherEvents {
   onTradeDetected: (signal: TradeSignal) => Promise<void>;
@@ -23,6 +54,10 @@ export class Watcher {
   private running: boolean = false;
   private events: WatcherEvents;
   private pollTimers: Map<string, NodeJS.Timeout> = new Map();
+
+  // Trade aggregation buffers - one per target
+  private aggregationBuffers: Map<string, AggregationBuffer> = new Map();
+  private aggregationTimers: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(
     targets: string[],
@@ -71,11 +106,18 @@ export class Watcher {
   async stop(): Promise<void> {
     this.running = false;
 
-    // Clear all timers
+    // Clear all poll timers
     for (const timer of this.pollTimers.values()) {
       clearTimeout(timer);
     }
     this.pollTimers.clear();
+
+    // Clear all aggregation timers
+    for (const timer of this.aggregationTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.aggregationTimers.clear();
+    this.aggregationBuffers.clear();
 
     logger.info("Watcher stopped");
   }
@@ -201,27 +243,11 @@ export class Watcher {
           continue;
         }
 
-        // New trade detected!
-        logTradeDetected(
-          logger,
-          signal.targetWallet,
-          signal.tradeId,
-          signal.side,
-          signal.price,
-          signal.tokenId
-        );
+        // Mark as seen (prevents re-processing)
+        await this.stateManager.markTradeSeen(target, signal.tradeId);
 
-        this.stateManager.recordTradeDetected(signal);
-
-        // Emit event for processing
-        try {
-          await this.events.onTradeDetected(signal);
-        } catch (error) {
-          this.events.onError(
-            error as Error,
-            `Processing trade ${signal.tradeId}`
-          );
-        }
+        // Add to aggregation buffer instead of processing immediately
+        await this.addToAggregationBuffer(target, signal);
       }
     } catch (error) {
       // Handle rate limiting
@@ -230,6 +256,144 @@ export class Watcher {
         await sleep(this.config.baseBackoffMs * 2);
       }
       throw error;
+    }
+  }
+
+  /**
+   * Add a trade to the aggregation buffer
+   * Trades on the same tokenId+side+activityType within the window are combined
+   */
+  private async addToAggregationBuffer(
+    target: string,
+    signal: TradeSignal
+  ): Promise<void> {
+    // Get or create buffer for this target
+    if (!this.aggregationBuffers.has(target)) {
+      this.aggregationBuffers.set(target, {});
+    }
+    const buffer = this.aggregationBuffers.get(target)!;
+
+    // Key for aggregation: tokenId + side + activityType
+    const activityType = signal.activityType || "TRADE";
+    const key = `${signal.tokenId}:${signal.side}:${activityType}`;
+
+    if (buffer[key]) {
+      // Add to existing aggregation
+      const agg = buffer[key];
+      agg.trades.push(signal);
+      agg.totalShares += signal.sizeShares || 0;
+      agg.totalNotionalUsd += signal.notionalUsd || 0;
+      agg.lastTimestamp = Math.max(agg.lastTimestamp, signal.timestamp);
+      
+      // Recalculate average price
+      const totalValue = agg.trades.reduce(
+        (sum, t) => sum + t.price * (t.sizeShares || 0),
+        0
+      );
+      agg.avgPrice = agg.totalShares > 0 ? totalValue / agg.totalShares : signal.price;
+
+      logger.debug(
+        `Aggregating ${activityType}: ${key} now has ${agg.trades.length} trades, $${agg.totalNotionalUsd.toFixed(2)}`
+      );
+    } else {
+      // Start new aggregation
+      buffer[key] = {
+        tokenId: signal.tokenId,
+        side: signal.side,
+        activityType,
+        targetWallet: target,
+        trades: [signal],
+        totalShares: signal.sizeShares || 0,
+        totalNotionalUsd: signal.notionalUsd || 0,
+        avgPrice: signal.price,
+        firstTimestamp: signal.timestamp,
+        lastTimestamp: signal.timestamp,
+      };
+
+      logger.debug(`New ${activityType} aggregation started: ${key}`);
+
+      // Start timer to flush this aggregation
+      this.scheduleAggregationFlush(target, key);
+    }
+  }
+
+  /**
+   * Schedule flush of an aggregated trade after the window expires
+   */
+  private scheduleAggregationFlush(target: string, key: string): void {
+    const timerKey = `${target}:${key}`;
+
+    // Clear any existing timer
+    if (this.aggregationTimers.has(timerKey)) {
+      clearTimeout(this.aggregationTimers.get(timerKey)!);
+    }
+
+    // Set new timer
+    const timer = setTimeout(async () => {
+      await this.flushAggregatedTrade(target, key);
+      this.aggregationTimers.delete(timerKey);
+    }, AGGREGATION_WINDOW_MS);
+
+    this.aggregationTimers.set(timerKey, timer);
+  }
+
+  /**
+   * Flush an aggregated trade - emit as a single trade event
+   */
+  private async flushAggregatedTrade(target: string, key: string): Promise<void> {
+    const buffer = this.aggregationBuffers.get(target);
+    if (!buffer || !buffer[key]) {
+      return;
+    }
+
+    const agg = buffer[key];
+    delete buffer[key];
+
+    // Create a merged trade signal
+    const mergedSignal: TradeSignal = {
+      targetWallet: target,
+      tradeId: `agg-${agg.trades[0].tradeId}`, // Use first trade's ID with prefix
+      timestamp: agg.lastTimestamp,
+      tokenId: agg.tokenId,
+      side: agg.side,
+      price: agg.avgPrice,
+      sizeShares: agg.totalShares,
+      notionalUsd: agg.totalNotionalUsd,
+      outcome: agg.trades[0].outcome,
+      conditionId: agg.trades[0].conditionId,
+      marketSlug: agg.trades[0].marketSlug,
+      activityType: agg.activityType,
+    };
+
+    logger.info("Emitting aggregated activity", {
+      type: agg.activityType,
+      side: agg.side,
+      tradesAggregated: agg.trades.length,
+      totalNotionalUsd: agg.totalNotionalUsd.toFixed(2),
+      avgPrice: agg.avgPrice.toFixed(4),
+      tokenId: agg.tokenId.substring(0, 16) + "...",
+    });
+
+    // Log the aggregated trade
+    logTradeDetected(
+      logger,
+      mergedSignal.targetWallet,
+      mergedSignal.tradeId,
+      mergedSignal.side,
+      mergedSignal.price,
+      mergedSignal.tokenId
+    );
+
+    this.stateManager.recordTradeDetected(mergedSignal);
+
+    // Emit the merged signal
+    try {
+      await this.events.onTradeDetected(mergedSignal);
+    } catch (error) {
+      this.events.onError(
+        error as Error,
+        `Processing aggregated ${agg.activityType} ${mergedSignal.tradeId}`
+      );
     }
   }
 

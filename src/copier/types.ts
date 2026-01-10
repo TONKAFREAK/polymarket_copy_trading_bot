@@ -8,6 +8,25 @@
 
 export type TradeSide = "BUY" | "SELL";
 
+/**
+ * Activity types from Polymarket API
+ * - TRADE: Regular buy/sell trade
+ * - SPLIT: Split collateral into YES/NO tokens
+ * - MERGE: Merge YES+NO tokens back into collateral
+ * - REDEEM: Redeem winning tokens after market resolution
+ * - REWARD: Liquidity rewards or incentives
+ * - CONVERSION: Token conversion
+ * - MAKER_REBATE: Rebate for market makers
+ */
+export type ActivityType =
+  | "TRADE"
+  | "SPLIT"
+  | "MERGE"
+  | "REDEEM"
+  | "REWARD"
+  | "CONVERSION"
+  | "MAKER_REBATE";
+
 export interface TradeSignal {
   /** Wallet address of the target being copied */
   targetWallet: string;
@@ -31,6 +50,8 @@ export interface TradeSignal {
   notionalUsd?: number;
   /** Outcome: YES or NO */
   outcome?: "YES" | "NO";
+  /** Activity type from API */
+  activityType?: ActivityType;
   /** Raw API response for debugging */
   rawData?: Record<string, unknown>;
 }
@@ -174,6 +195,8 @@ export interface DataApiTrade {
   timestamp: string;
   transactionHash: string;
   outcome: string;
+  // Activity type field
+  type?: string;
   // Additional fields that may be present
   conditionId?: string;
   tokenId?: string;
@@ -191,6 +214,8 @@ export interface DataApiActivity {
   size: string;
   timestamp: string;
   conditionId?: string;
+  transactionHash?: string;
+  outcome?: string;
   [key: string]: unknown;
 }
 
@@ -203,6 +228,16 @@ export interface GammaMarket {
   endDate: string;
   active: boolean;
   closed: boolean;
+  /** Comma-separated outcome prices, e.g. "1,0" means YES won, "0,1" means NO won */
+  outcomePrices?: string;
+  /** JSON string of outcomes array, e.g. '["Yes","No"]' */
+  outcomes?: string;
+  /** Resolution status from UMA oracle */
+  umaResolutionStatus?: string;
+  /** When market was resolved/closed */
+  closedTime?: string;
+  /** CLOB token IDs as JSON array string */
+  clobTokenIds?: string;
   [key: string]: unknown;
 }
 
@@ -210,6 +245,7 @@ export interface GammaToken {
   token_id: string;
   outcome: string;
   price: number;
+  winner?: boolean;
   [key: string]: unknown;
 }
 

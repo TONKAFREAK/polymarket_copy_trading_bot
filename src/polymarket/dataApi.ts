@@ -4,11 +4,36 @@
 
 import { AxiosInstance } from "axios";
 import { createHttpClient, fetchWithRetry } from "../utils/http";
-import { DataApiTrade, TradeSignal } from "../copier/types";
+import { DataApiTrade, TradeSignal, ActivityType } from "../copier/types";
 import { getEnvConfig } from "../config/env";
 import { getLogger } from "../utils/logger";
 
 const logger = getLogger();
+
+/**
+ * Activity types we can copy:
+ * - TRADE: Regular buy/sell trades (primary)
+ * - SPLIT: Split collateral into YES/NO tokens (creates position)
+ * - MERGE: Merge YES+NO tokens back into collateral (closes positions)
+ * - REDEEM: Redeem winning tokens after market resolution
+ * 
+ * Activity types we skip:
+ * - REWARD: Liquidity rewards (not actionable)
+ * - CONVERSION: Token conversion (internal)
+ * - MAKER_REBATE: Rebate for market makers (not actionable)
+ */
+const COPYABLE_ACTIVITY_TYPES = new Set<string>([
+  "TRADE",
+  "SPLIT", 
+  "MERGE",
+  "REDEEM",
+]);
+
+const SKIPPED_ACTIVITY_TYPES = new Set<string>([
+  "REWARD",
+  "CONVERSION", 
+  "MAKER_REBATE",
+]);
 
 export interface DataApiConfig {
   baseUrl: string;
@@ -37,8 +62,9 @@ export class DataApiClient {
   }
 
   /**
-   * Fetch recent trades for a wallet address
+   * Fetch recent activities for a wallet address
    * Uses the /activity endpoint with user parameter
+   * Handles all activity types: TRADE, SPLIT, MERGE, REDEEM, etc.
    */
   async fetchTrades(
     walletAddress: string,
@@ -48,7 +74,7 @@ export class DataApiClient {
 
     try {
       logger.debug(
-        `Fetching trades for wallet: ${walletAddress.substring(0, 10)}...`
+        `Fetching activities for wallet: ${walletAddress.substring(0, 10)}...`
       );
 
       const response = await fetchWithRetry<DataApiTrade[]>(
@@ -67,21 +93,34 @@ export class DataApiClient {
         }
       );
 
-      // Filter to only TRADE type activities
-      const trades = (response || []).filter(
-        (item) => !item.type || item.type === "TRADE"
-      );
+      // Filter to only copyable activity types
+      const activities = (response || []).filter((item) => {
+        const actType = item.type?.toUpperCase() || "TRADE";
+        
+        if (COPYABLE_ACTIVITY_TYPES.has(actType)) {
+          return true;
+        }
+        
+        if (SKIPPED_ACTIVITY_TYPES.has(actType)) {
+          logger.debug(`Skipping non-copyable activity type: ${actType}`);
+          return false;
+        }
+        
+        // Unknown type - log and skip
+        logger.warn(`Unknown activity type: ${actType}`, { activity: item });
+        return false;
+      });
 
       logger.debug(
-        `Fetched ${trades.length} trades for ${walletAddress.substring(
+        `Fetched ${activities.length} copyable activities for ${walletAddress.substring(
           0,
           10
         )}...`
       );
 
-      return trades;
+      return activities;
     } catch (error) {
-      logger.error("Failed to fetch trades from Data API", {
+      logger.error("Failed to fetch activities from Data API", {
         wallet: walletAddress,
         error: (error as Error).message,
       });
@@ -127,7 +166,8 @@ export class DataApiClient {
   }
 
   /**
-   * Normalize a Data API trade into our internal TradeSignal format
+   * Normalize a Data API activity into our internal TradeSignal format
+   * Handles all activity types: TRADE, SPLIT, MERGE, REDEEM
    */
   normalizeTrade(trade: DataApiTrade, targetWallet: string): TradeSignal {
     // Parse timestamp - activity endpoint returns Unix timestamp in seconds
@@ -140,8 +180,31 @@ export class DataApiClient {
       timestamp = ts > 1e12 ? ts : ts * 1000;
     }
 
-    // Side is directly available from activity endpoint
-    const side = (trade.side?.toUpperCase() as "BUY" | "SELL") || "BUY";
+    // Get activity type
+    const activityType = (trade.type?.toUpperCase() || "TRADE") as ActivityType;
+
+    // Determine side based on activity type
+    let side: "BUY" | "SELL";
+    switch (activityType) {
+      case "TRADE":
+        // Regular trade - use the side from API
+        side = (trade.side?.toUpperCase() as "BUY" | "SELL") || "BUY";
+        break;
+      case "SPLIT":
+        // SPLIT creates tokens from collateral - similar to buying
+        side = "BUY";
+        break;
+      case "MERGE":
+        // MERGE converts tokens back to collateral - similar to selling
+        side = "SELL";
+        break;
+      case "REDEEM":
+        // REDEEM cashes out winning position - similar to selling
+        side = "SELL";
+        break;
+      default:
+        side = (trade.side?.toUpperCase() as "BUY" | "SELL") || "BUY";
+    }
 
     // Extract token ID - in activity endpoint it's 'asset'
     const tokenId = trade.asset || trade.tokenId || "";
@@ -150,8 +213,17 @@ export class DataApiClient {
     const conditionId = trade.conditionId;
 
     // Parse price and size
-    const price = parseFloat(String(trade.price)) || 0;
+    // For SPLIT/MERGE, price might be different (1.0 for collateral ratio)
+    let price = parseFloat(String(trade.price)) || 0;
     const sizeShares = parseFloat(String(trade.size)) || 0;
+
+    // For SPLIT, the price represents the split ratio (usually 1.0)
+    // For MERGE, same - represents merge ratio
+    // For REDEEM, price is the redemption value (1.0 for winning tokens)
+    if (activityType === "SPLIT" || activityType === "MERGE") {
+      // Use a reasonable price estimate for position tracking
+      price = price > 0 ? price : 0.5;
+    }
 
     // Activity endpoint may include usdcSize directly
     const usdcSize = (trade as Record<string, unknown>).usdcSize;
@@ -181,6 +253,7 @@ export class DataApiClient {
       sizeShares,
       notionalUsd,
       outcome: this.parseOutcome(trade.outcome),
+      activityType,
       rawData: trade as Record<string, unknown>,
     };
   }

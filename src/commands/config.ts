@@ -77,16 +77,17 @@ export function createConfigCommand(): Command {
 
         // Risk config
         console.log(chalk.bold("\nRisk:"));
+        const maxTrade = config.risk.maxUsdPerTrade;
+        const maxMarket = config.risk.maxUsdPerMarket;
+        const maxDaily = config.risk.maxDailyUsdVolume;
         console.log(
-          `  ${chalk.cyan("maxUsdPerTrade:")} $${config.risk.maxUsdPerTrade}`
+          `  ${chalk.cyan("maxUsdPerTrade:")} $${maxTrade > 1e9 ? "unlimited" : maxTrade.toLocaleString()}`
         );
         console.log(
-          `  ${chalk.cyan("maxUsdPerMarket:")} $${config.risk.maxUsdPerMarket}`
+          `  ${chalk.cyan("maxUsdPerMarket:")} $${maxMarket > 1e9 ? "unlimited" : maxMarket.toLocaleString()}`
         );
         console.log(
-          `  ${chalk.cyan("maxDailyUsdVolume:")} $${
-            config.risk.maxDailyUsdVolume
-          }`
+          `  ${chalk.cyan("maxDailyUsdVolume:")} $${maxDaily > 1e9 ? "unlimited" : maxDaily.toLocaleString()}`
         );
         console.log(
           `  ${chalk.cyan("dryRun:")} ${
@@ -128,7 +129,7 @@ export function createConfigCommand(): Command {
           `  ${chalk.cyan("targets:")} ${config.targets.length} wallet(s)`
         );
 
-        console.log(chalk.gray("\n─".repeat(50)));
+        console.log("\n" + chalk.gray("─".repeat(50)));
         console.log(
           chalk.gray("\nUse: pmcopy config set <key> <value> to update\n")
         );

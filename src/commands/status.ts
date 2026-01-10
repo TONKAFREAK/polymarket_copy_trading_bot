@@ -65,13 +65,16 @@ export function createStatusCommand(): Command {
         console.log(`    ${chalk.gray("•")} ${t}`);
       });
 
-      console.log(
-        `  ${chalk.cyan("Mode:")} ${
-          status.mode === "dry-run"
-            ? chalk.yellow("DRY RUN")
-            : chalk.red("LIVE")
-        }`
-      );
+      // Show trading mode (Dry Run / Paper Trading / Live)
+      let modeDisplay: string;
+      if (status.mode === "dry-run") {
+        modeDisplay = chalk.yellow("DRY RUN");
+      } else if (env.paperTrading) {
+        modeDisplay = chalk.blue("PAPER TRADING");
+      } else {
+        modeDisplay = chalk.red("LIVE");
+      }
+      console.log(`  ${chalk.cyan("Mode:")} ${modeDisplay}`);
       console.log(
         `  ${chalk.cyan("Sizing:")} ${status.sizingMode} (${
           status.sizingValue
@@ -84,16 +87,17 @@ export function createStatusCommand(): Command {
 
       // Risk limits
       console.log(chalk.bold("Risk Limits:"));
+      const maxTrade = status.riskLimits.maxPerTrade;
+      const maxMarket = status.riskLimits.maxPerMarket;
+      const maxDaily = status.riskLimits.maxDailyVolume;
       console.log(
-        `  ${chalk.cyan("Max per Trade:")} $${status.riskLimits.maxPerTrade}`
+        `  ${chalk.cyan("Max per Trade:")} $${maxTrade > 1e9 ? "unlimited" : maxTrade.toLocaleString()}`
       );
       console.log(
-        `  ${chalk.cyan("Max per Market:")} $${status.riskLimits.maxPerMarket}`
+        `  ${chalk.cyan("Max per Market:")} $${maxMarket > 1e9 ? "unlimited" : maxMarket.toLocaleString()}`
       );
       console.log(
-        `  ${chalk.cyan("Max Daily Volume:")} $${
-          status.riskLimits.maxDailyVolume
-        }`
+        `  ${chalk.cyan("Max Daily Volume:")} $${maxDaily > 1e9 ? "unlimited" : maxDaily.toLocaleString()}`
       );
 
       console.log(chalk.gray("─".repeat(50)));
@@ -108,25 +112,29 @@ export function createStatusCommand(): Command {
           "Volume Used:"
         )} $${status.dailyStats.volumeUsed.toFixed(2)}`
       );
-      console.log(
-        `  ${chalk.cyan(
-          "Volume Remaining:"
-        )} $${status.dailyStats.volumeRemaining.toFixed(2)}`
-      );
+      
+      // Only show remaining and progress bar if there's an actual limit
+      if (maxDaily <= 1e9) {
+        console.log(
+          `  ${chalk.cyan(
+            "Volume Remaining:"
+          )} $${status.dailyStats.volumeRemaining.toFixed(2)}`
+        );
 
-      // Progress bar for daily volume
-      const volumePercent =
-        (status.dailyStats.volumeUsed / config.risk.maxDailyUsdVolume) * 100;
-      const progressWidth = 30;
-      const filledWidth = Math.min(
-        progressWidth,
-        Math.round((volumePercent / 100) * progressWidth)
-      );
-      const emptyWidth = progressWidth - filledWidth;
-      const progressBar =
-        chalk.green("█".repeat(filledWidth)) +
-        chalk.gray("░".repeat(emptyWidth));
-      console.log(`  ${progressBar} ${volumePercent.toFixed(1)}%`);
+        // Progress bar for daily volume
+        const volumePercent =
+          (status.dailyStats.volumeUsed / config.risk.maxDailyUsdVolume) * 100;
+        const progressWidth = 30;
+        const filledWidth = Math.min(
+          progressWidth,
+          Math.round((volumePercent / 100) * progressWidth)
+        );
+        const emptyWidth = progressWidth - filledWidth;
+        const progressBar =
+          chalk.green("█".repeat(filledWidth)) +
+          chalk.gray("░".repeat(emptyWidth));
+        console.log(`  ${progressBar} ${volumePercent.toFixed(1)}%`);
+      }
 
       console.log(chalk.gray("─".repeat(50)));
 

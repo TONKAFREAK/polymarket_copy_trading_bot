@@ -11,52 +11,74 @@ import {
   PollingConfig,
   SizingMode,
 } from "../copier/types";
+import { getEnvConfig, EnvConfig } from "./env";
 
-// Default configuration values
-const DEFAULT_TRADING_CONFIG: TradingConfig = {
-  sizingMode: "fixed_usd",
-  fixedUsdSize: 10,
-  fixedSharesSize: 10,
-  proportionalMultiplier: 0.25,
-  slippage: 0.01,
-};
+/**
+ * Get default trading config from environment variables
+ */
+function getDefaultTradingConfig(env: EnvConfig): TradingConfig {
+  return {
+    sizingMode: env.sizingMode as SizingMode,
+    fixedUsdSize: env.defaultUsdSize,
+    fixedSharesSize: env.defaultSharesSize,
+    proportionalMultiplier: env.proportionalMultiplier,
+    slippage: env.slippage,
+  };
+}
 
-const DEFAULT_RISK_CONFIG: RiskConfig = {
-  maxUsdPerTrade: 100,
-  maxUsdPerMarket: 500,
-  maxDailyUsdVolume: 1000,
-  doNotTradeMarketsOlderThanSecondsFromResolution: 0,
-  marketAllowlist: [],
-  marketDenylist: [],
-  dryRun: true,
-};
+/**
+ * Get default risk config from environment variables
+ */
+function getDefaultRiskConfig(env: EnvConfig): RiskConfig {
+  return {
+    maxUsdPerTrade: env.maxUsdPerTrade,
+    maxUsdPerMarket: env.maxUsdPerMarket,
+    maxDailyUsdVolume: env.maxDailyUsdVolume,
+    doNotTradeMarketsOlderThanSecondsFromResolution: 0,
+    marketAllowlist: [],
+    marketDenylist: [],
+    dryRun: env.dryRun,
+  };
+}
 
-const DEFAULT_POLLING_CONFIG: PollingConfig = {
-  intervalMs: 2500,
-  tradeLimit: 20,
-  maxRetries: 3,
-  baseBackoffMs: 1000,
-};
+/**
+ * Get default polling config from environment variables
+ */
+function getDefaultPollingConfig(env: EnvConfig): PollingConfig {
+  return {
+    intervalMs: env.pollIntervalMs,
+    tradeLimit: 20,
+    maxRetries: 3,
+    baseBackoffMs: 1000,
+  };
+}
 
-const DEFAULT_APP_CONFIG: AppConfig = {
-  trading: DEFAULT_TRADING_CONFIG,
-  risk: DEFAULT_RISK_CONFIG,
-  polling: DEFAULT_POLLING_CONFIG,
-  targets: [],
-  chainId: 137,
-};
+/**
+ * Get default app config from environment variables
+ */
+function getDefaultAppConfig(env: EnvConfig): AppConfig {
+  return {
+    trading: getDefaultTradingConfig(env),
+    risk: getDefaultRiskConfig(env),
+    polling: getDefaultPollingConfig(env),
+    targets: [],
+    chainId: env.chainId,
+  };
+}
 
 export class ConfigManager {
   private configPath: string;
   private config: AppConfig;
+  private env: EnvConfig;
 
   constructor(dataDir: string = "./data") {
     this.configPath = path.join(dataDir, "config.json");
+    this.env = getEnvConfig();
     this.config = this.loadConfig();
   }
 
   /**
-   * Load configuration from file or create default
+   * Load configuration from file or create default from env
    */
   private loadConfig(): AppConfig {
     try {
@@ -66,22 +88,30 @@ export class ConfigManager {
         return this.mergeWithDefaults(loaded);
       }
     } catch (error) {
-      console.warn("Failed to load config, using defaults:", error);
+      console.warn("Failed to load config, using defaults from .env:", error);
     }
-    return { ...DEFAULT_APP_CONFIG };
+    return getDefaultAppConfig(this.env);
   }
 
   /**
-   * Merge loaded config with defaults to ensure all fields exist
+   * Merge loaded config with defaults (from env) to ensure all fields exist
    */
   private mergeWithDefaults(loaded: Partial<AppConfig>): AppConfig {
+    const defaultConfig = getDefaultAppConfig(this.env);
     return {
-      trading: { ...DEFAULT_TRADING_CONFIG, ...loaded.trading },
-      risk: { ...DEFAULT_RISK_CONFIG, ...loaded.risk },
-      polling: { ...DEFAULT_POLLING_CONFIG, ...loaded.polling },
+      trading: { ...defaultConfig.trading, ...loaded.trading },
+      risk: { ...defaultConfig.risk, ...loaded.risk },
+      polling: { ...defaultConfig.polling, ...loaded.polling },
       targets: loaded.targets || [],
-      chainId: loaded.chainId || 137,
+      chainId: loaded.chainId || this.env.chainId,
     };
+  }
+
+  /**
+   * Get the environment config
+   */
+  getEnvConfig(): EnvConfig {
+    return this.env;
   }
 
   /**
@@ -317,10 +347,70 @@ export class ConfigManager {
   }
 
   /**
-   * Reset configuration to defaults
+   * Initialize with full options (used by init command)
+   */
+  initializeFull(options: {
+    targets?: string[];
+    sizingMode?: SizingMode;
+    fixedUsdSize?: number;
+    fixedSharesSize?: number;
+    proportionalMultiplier?: number;
+    slippage?: number;
+    maxUsdPerTrade?: number;
+    maxUsdPerMarket?: number;
+    maxDailyUsdVolume?: number;
+    pollIntervalMs?: number;
+    dryRun?: boolean;
+  }): void {
+    // Set targets
+    if (options.targets) {
+      this.setTargets(options.targets);
+    }
+    
+    // Trading config
+    if (options.sizingMode) {
+      this.config.trading.sizingMode = options.sizingMode;
+    }
+    if (options.fixedUsdSize !== undefined && !isNaN(options.fixedUsdSize)) {
+      this.config.trading.fixedUsdSize = options.fixedUsdSize;
+    }
+    if (options.fixedSharesSize !== undefined && !isNaN(options.fixedSharesSize)) {
+      this.config.trading.fixedSharesSize = options.fixedSharesSize;
+    }
+    if (options.proportionalMultiplier !== undefined && !isNaN(options.proportionalMultiplier)) {
+      this.config.trading.proportionalMultiplier = options.proportionalMultiplier;
+    }
+    if (options.slippage !== undefined && !isNaN(options.slippage)) {
+      this.config.trading.slippage = options.slippage;
+    }
+    
+    // Risk config
+    if (options.maxUsdPerTrade !== undefined && !isNaN(options.maxUsdPerTrade)) {
+      this.config.risk.maxUsdPerTrade = options.maxUsdPerTrade;
+    }
+    if (options.maxUsdPerMarket !== undefined && !isNaN(options.maxUsdPerMarket)) {
+      this.config.risk.maxUsdPerMarket = options.maxUsdPerMarket;
+    }
+    if (options.maxDailyUsdVolume !== undefined && !isNaN(options.maxDailyUsdVolume)) {
+      this.config.risk.maxDailyUsdVolume = options.maxDailyUsdVolume;
+    }
+    if (options.dryRun !== undefined) {
+      this.config.risk.dryRun = options.dryRun;
+    }
+    
+    // Polling config
+    if (options.pollIntervalMs !== undefined && !isNaN(options.pollIntervalMs)) {
+      this.config.polling.intervalMs = options.pollIntervalMs;
+    }
+    
+    this.save();
+  }
+
+  /**
+   * Reset configuration to defaults (from env)
    */
   reset(): void {
-    this.config = { ...DEFAULT_APP_CONFIG };
+    this.config = getDefaultAppConfig(this.env);
     this.save();
   }
 

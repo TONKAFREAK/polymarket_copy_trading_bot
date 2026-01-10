@@ -28,6 +28,11 @@ A production-grade CLI copy-trading bot for Polymarket prediction markets. Autom
 - 🔌 **Optional Redis**: File-based by default, Redis optional
 - 🧪 **Dry-run mode**: Test without real money
 - 📈 **Paper trading**: Simulate trades with virtual funds and track PnL
+- 💰 **Market resolution P&L**: Automatic settlement when prediction markets resolve
+- 📺 **Live stats mode**: Real-time monitoring with `--watch` flag
+- 🔀 **Trade aggregation**: Combines rapid-fire fills into single trades
+- 📋 **Activity types**: Tracks TRADE, SPLIT, MERGE, and REDEEM operations
+- 🏆 **Win/loss tracking**: See resolved market outcomes and win rate
 
 ## Quick Start
 
@@ -111,33 +116,43 @@ npx tsx src/cli.ts run --dry-run
 
 ### `pmcopy init`
 
-Initialize the copy trader configuration.
+Initialize the copy trader configuration. All settings default to values from your `.env` file.
 
 ```bash
 pmcopy init [options]
 
 Options:
-  -t, --targets <addresses>  Comma-separated wallet addresses to copy
-  -m, --mode <mode>         Sizing mode: fixed_usd, fixed_shares, proportional
-  -u, --usd <amount>        USD per trade (for fixed_usd mode) [default: 10]
-  -s, --shares <amount>     Shares per trade (for fixed_shares mode)
-  --slippage <percent>      Slippage tolerance [default: 0.01]
-  -d, --dry-run            Enable dry-run mode (default)
-  --no-dry-run             Enable live trading
-  -f, --force              Force reinitialize
+  -t, --targets <addresses>      Comma-separated wallet addresses to copy
+  -m, --mode <mode>              Sizing mode: fixed_usd, fixed_shares, proportional
+  -u, --usd <amount>             USD per trade (for fixed_usd mode)
+  -s, --shares <amount>          Shares per trade (for fixed_shares mode)
+  --multiplier <ratio>           Proportional multiplier (e.g., 0.25 for 25%)
+  --slippage <percent>           Slippage tolerance (e.g., 0.01 for 1%)
+  --max-usd-per-trade <amount>   Maximum USD per single trade
+  --max-usd-per-market <amount>  Maximum USD exposure per market
+  --max-daily-volume <amount>    Maximum daily USD trading volume
+  --poll-interval <ms>           Polling interval in milliseconds
+  -d, --dry-run                  Enable dry-run mode (default from .env)
+  --no-dry-run                   Enable live trading
+  -f, --force                    Force reinitialize
 ```
+
+**Note:** All defaults come from your `.env` file. If not set in `.env`, sensible defaults are used.
 
 **Examples:**
 
 ```bash
-# Initialize with defaults (dry-run enabled)
+# Initialize with defaults from .env
 pmcopy init --targets 0xabc123...
 
-# Initialize with custom settings
+# Initialize with custom settings (overrides .env)
 pmcopy init -t 0xabc...,0xdef... -m fixed_usd -u 25 --slippage 0.02
 
-# Initialize for proportional copying (25% of target size)
-pmcopy init -t 0xabc... -m proportional
+# Initialize for proportional copying (10% of target size)
+pmcopy init -t 0xabc... -m proportional --multiplier 0.1
+
+# Initialize with custom risk limits
+pmcopy init -t 0xabc... --max-usd-per-trade 50 --max-daily-volume 500
 ```
 
 ### `pmcopy run`
@@ -223,6 +238,21 @@ pmcopy config reset --force
 View paper trading performance and PnL.
 
 ```bash
+pmcopy stats [options]
+
+Options:
+  -j, --json              Output as JSON
+  -c, --csv               Export trades to CSV
+  -r, --reset             Reset paper trading account
+  -b, --balance <amount>  Starting balance for reset (default: 1000)
+  -s, --settle            Force settlement of resolved positions
+  -w, --watch             Live auto-refresh mode
+  -i, --interval <secs>   Refresh interval for watch mode (default: 10)
+```
+
+**Examples:**
+
+```bash
 # Show paper trading stats (requires PAPER_TRADING=true)
 pmcopy stats
 
@@ -237,6 +267,15 @@ pmcopy stats --reset
 
 # Reset with custom starting balance
 pmcopy stats --reset --balance 500
+
+# Force settlement check for resolved markets
+pmcopy stats --settle
+
+# Live stats mode (auto-refresh every 10 seconds)
+pmcopy stats --watch
+
+# Live stats with custom refresh interval (30 seconds)
+pmcopy stats --watch --interval 30
 ```
 
 ---
@@ -250,14 +289,27 @@ pmcopy stats --reset --balance 500
 | `PRIVATE_KEY`   | Your wallet private key (required for live trading) | -                                |
 | `CHAIN_ID`      | Network: 137 (Polygon) or 80001 (Mumbai)            | 137                              |
 | `RPC_URL`       | Polygon RPC endpoint                                | https://polygon-rpc.com          |
-| `CLOB_API_URL`  | Polymarket CLOB API                                 | https://clob.polymarket.com      |
-| `DATA_API_URL`  | Polymarket Data API                                 | https://data-api.polymarket.com  |
-| `GAMMA_API_URL` | Polymarket Gamma API                                | https://gamma-api.polymarket.com |
+| `CLOB_API_URL`  | Polymarket CLOB API (order execution)               | https://clob.polymarket.com      |
+| `DATA_API_URL`  | Polymarket Data API (wallet activity)               | https://data-api.polymarket.com  |
+| `GAMMA_API_URL` | Polymarket Gamma API (market metadata)              | https://gamma-api.polymarket.com |
+| `WS_URL`        | Real-time data WebSocket                            | wss://ws-subscriptions-clob.polymarket.com/ws |
+| `PAPER_TRADING` | Enable paper trading with virtual funds             | false                            |
+| `PAPER_STARTING_BALANCE` | Initial virtual balance                    | 1000                             |
+| `PAPER_FEE_RATE` | Simulated trading fee (0.001 = 0.1%)               | 0.001                            |
 | `USE_REDIS`     | Use Redis for persistence                           | false                            |
 | `REDIS_URL`     | Redis connection URL                                | redis://localhost:6379           |
 | `DATA_DIR`      | Directory for JSON persistence                      | ./data                           |
 | `LOG_LEVEL`     | Logging level                                       | info                             |
 | `DRY_RUN`       | Default dry-run mode                                | true                             |
+
+### Polymarket API Endpoints
+
+| API         | URL                                              | Purpose                                |
+| ----------- | ------------------------------------------------ | -------------------------------------- |
+| **CLOB**    | https://clob.polymarket.com                      | Order placement, balances, order book  |
+| **Data**    | https://data-api.polymarket.com                  | Wallet activity history, trade lookup  |
+| **Gamma**   | https://gamma-api.polymarket.com                 | Market metadata, resolution status     |
+| **RTDS WS** | wss://ws-subscriptions-clob.polymarket.com/ws    | Real-time price updates, order fills   |
 
 ### Configuration Keys
 
@@ -365,6 +417,48 @@ pmcopy stats --json
 - **Trade Stats**: Win rate, total trades, largest win/loss
 - **Positions**: All open positions with current prices
 - **History**: Recent trades with PnL per trade
+- **Resolved Markets**: Automatic settlement with correct P&L calculation
+
+### Market Resolution & Settlement
+
+Polymarket is a prediction market where:
+- **Winning shares** pay out $1.00 each
+- **Losing shares** pay out $0.00 each
+
+When markets resolve, paper trading automatically:
+1. Detects resolution via the Gamma API (`outcomePrices` field)
+2. Determines if your position won or lost
+3. Calculates P&L: `(shares × settlementPrice) - costBasis`
+4. Updates your balance accordingly
+5. Tracks win rate and settlement history
+
+**Example**: You buy 100 YES shares at $0.65 ($65 total). If YES wins:
+- Settlement value: 100 × $1.00 = $100
+- P&L: $100 - $65 = **+$35 profit**
+
+If YES loses:
+- Settlement value: 100 × $0.00 = $0
+- P&L: $0 - $65 = **-$65 loss**
+
+### Live Stats Mode
+
+Monitor your paper trading performance in real-time:
+
+```bash
+# Auto-refresh every 10 seconds
+pmcopy stats --watch
+
+# Custom refresh interval (30 seconds)
+pmcopy stats --watch --interval 30
+
+# Press Ctrl+C to stop
+```
+
+Live stats automatically:
+- Update position prices from current market data
+- Settle any newly resolved positions
+- Recalculate unrealized P&L
+- Show real-time account value
 
 ### Resetting Paper Account
 
@@ -411,13 +505,36 @@ pmcopy stats --reset --balance 500
 
 ### Flow
 
-1. **Polling**: Every 2.5 seconds, fetch recent trades for each target wallet
-2. **Detection**: Parse and normalize trades into internal format
-3. **Deduplication**: Skip trades that have been seen before
-4. **Risk Check**: Validate against all risk limits
-5. **Token Resolution**: Resolve market metadata if needed
-6. **Execution**: Place order via CLOB (or simulate in dry-run)
-7. **Persistence**: Save state to prevent replay
+1. **Polling**: Every 2.5 seconds, fetch recent activity for each target wallet
+2. **Detection**: Parse and normalize trades, splits, merges, and redemptions
+3. **Aggregation**: Combine rapid-fire trades within 5-second windows
+4. **Deduplication**: Skip activities that have been seen before
+5. **Risk Check**: Validate against all risk limits
+6. **Token Resolution**: Resolve market metadata if needed
+7. **Execution**: Place order via CLOB (or simulate in dry-run/paper trading)
+8. **Persistence**: Save state to prevent replay
+
+### Activity Types
+
+The bot detects and handles multiple activity types from target wallets:
+
+| Type       | Description                                    | Action                           |
+| ---------- | ---------------------------------------------- | -------------------------------- |
+| `TRADE`    | Standard buy/sell order                        | Copy the trade                   |
+| `SPLIT`    | USDC split into YES + NO positions             | Buy both outcomes                |
+| `MERGE`    | YES + NO positions merged back to USDC         | Sell both outcomes               |
+| `REDEEM`   | Winning shares redeemed for $1                 | Auto-settled (market resolved)   |
+
+### Trade Aggregation
+
+When target wallets execute multiple trades rapidly (common with large orders that fill across multiple price levels), the bot aggregates them:
+
+- **5-second window**: Trades on the same market within 5 seconds are combined
+- **Prevents over-trading**: Instead of copying 10 small fills, copies 1 aggregated trade
+- **Accurate sizing**: Total shares and USD amounts are summed correctly
+
+Example: Target buys 1000 shares filled as 100+200+300+400 in 2 seconds
+→ Bot copies as single 1000-share trade
 
 ### Sizing Modes
 
@@ -539,6 +656,7 @@ polymarket-copy-trader/
 │   │   ├── init.ts
 │   │   ├── run.ts
 │   │   ├── status.ts
+│   │   ├── stats.ts           # Paper trading stats (--watch, --settle)
 │   │   ├── targets.ts
 │   │   └── config.ts
 │   ├── config/                # Configuration management
@@ -549,16 +667,17 @@ polymarket-copy-trader/
 │   │   ├── fileProvider.ts
 │   │   └── redisProvider.ts
 │   ├── polymarket/            # Polymarket API clients
-│   │   ├── clobClient.ts
-│   │   ├── dataApi.ts
-│   │   ├── gammaApi.ts
-│   │   └── tokenResolver.ts
+│   │   ├── clobClient.ts      # CLOB API for order execution
+│   │   ├── dataApi.ts         # Data API for wallet activity
+│   │   ├── gammaApi.ts        # Gamma API for market metadata & resolution
+│   │   └── tokenResolver.ts   # Token ID resolution
 │   ├── copier/                # Core copy trading logic
-│   │   ├── types.ts
-│   │   ├── watcher.ts
-│   │   ├── executor.ts
-│   │   ├── risk.ts
-│   │   └── state.ts
+│   │   ├── types.ts           # Type definitions
+│   │   ├── watcher.ts         # Trade detection & aggregation
+│   │   ├── executor.ts        # Trade execution
+│   │   ├── paperTrading.ts    # Paper trading simulation
+│   │   ├── risk.ts            # Risk management
+│   │   └── state.ts           # State management
 │   └── utils/                 # Utilities
 │       ├── http.ts
 │       └── logger.ts

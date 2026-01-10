@@ -206,6 +206,100 @@ export class GammaApiClient {
       active: market.active && !market.closed,
     };
   }
+
+  /**
+   * Get market resolution info - determine if market is resolved and which outcome won
+   * Returns: { resolved: boolean, winningOutcome: "YES" | "NO" | null, winningTokenId: string | null }
+   */
+  async getMarketResolution(
+    slug: string
+  ): Promise<{
+    resolved: boolean;
+    winningOutcome: "YES" | "NO" | null;
+    winningTokenId: string | null;
+    outcomePrices: number[];
+  }> {
+    try {
+      const market = await this.getMarketBySlug(slug);
+      if (!market) {
+        return { resolved: false, winningOutcome: null, winningTokenId: null, outcomePrices: [] };
+      }
+
+      // Check if market is closed/resolved
+      const isResolved = market.closed === true;
+
+      if (!isResolved) {
+        return { resolved: false, winningOutcome: null, winningTokenId: null, outcomePrices: [] };
+      }
+
+      // Parse outcome prices to determine winner
+      // outcomePrices is comma-separated, e.g., "1,0" means first outcome (YES) won
+      // "0,1" means second outcome (NO) won
+      let winningOutcome: "YES" | "NO" | null = null;
+      let winningTokenId: string | null = null;
+      let outcomePrices: number[] = [];
+
+      if (market.outcomePrices) {
+        try {
+          // Parse as comma-separated or JSON array
+          if (market.outcomePrices.startsWith("[")) {
+            outcomePrices = JSON.parse(market.outcomePrices);
+          } else {
+            outcomePrices = market.outcomePrices.split(",").map((p) => parseFloat(p));
+          }
+
+          // Determine winner based on which price is 1 (or closest to 1)
+          if (outcomePrices.length >= 2) {
+            if (outcomePrices[0] >= 0.99) {
+              winningOutcome = "YES";
+              if (market.tokens && market.tokens.length > 0) {
+                winningTokenId = market.tokens[0].token_id;
+              }
+            } else if (outcomePrices[1] >= 0.99) {
+              winningOutcome = "NO";
+              if (market.tokens && market.tokens.length > 1) {
+                winningTokenId = market.tokens[1].token_id;
+              }
+            }
+          }
+        } catch {
+          logger.warn("Failed to parse outcomePrices", { slug, outcomePrices: market.outcomePrices });
+        }
+      }
+
+      // Also check CLOB token IDs to match
+      if (market.clobTokenIds) {
+        try {
+          const tokenIds = JSON.parse(market.clobTokenIds);
+          if (Array.isArray(tokenIds) && tokenIds.length >= 2) {
+            if (winningOutcome === "YES") {
+              winningTokenId = tokenIds[0];
+            } else if (winningOutcome === "NO") {
+              winningTokenId = tokenIds[1];
+            }
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+
+      return { resolved: isResolved, winningOutcome, winningTokenId, outcomePrices };
+    } catch (error) {
+      logger.debug("Failed to get market resolution", { slug, error: (error as Error).message });
+      return { resolved: false, winningOutcome: null, winningTokenId: null, outcomePrices: [] };
+    }
+  }
+
+  /**
+   * Check if a specific token ID is a winner in a resolved market
+   */
+  async isTokenWinner(tokenId: string, slug: string): Promise<boolean | null> {
+    const resolution = await this.getMarketResolution(slug);
+    if (!resolution.resolved) {
+      return null; // Market not resolved yet
+    }
+    return resolution.winningTokenId === tokenId;
+  }
 }
 
 // Singleton instance

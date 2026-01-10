@@ -284,32 +284,32 @@ pmcopy stats --watch --interval 30
 
 ### Environment Variables (.env)
 
-| Variable        | Description                                         | Default                          |
-| --------------- | --------------------------------------------------- | -------------------------------- |
-| `PRIVATE_KEY`   | Your wallet private key (required for live trading) | -                                |
-| `CHAIN_ID`      | Network: 137 (Polygon) or 80001 (Mumbai)            | 137                              |
-| `RPC_URL`       | Polygon RPC endpoint                                | https://polygon-rpc.com          |
-| `CLOB_API_URL`  | Polymarket CLOB API (order execution)               | https://clob.polymarket.com      |
-| `DATA_API_URL`  | Polymarket Data API (wallet activity)               | https://data-api.polymarket.com  |
-| `GAMMA_API_URL` | Polymarket Gamma API (market metadata)              | https://gamma-api.polymarket.com |
-| `WS_URL`        | Real-time data WebSocket                            | wss://ws-subscriptions-clob.polymarket.com/ws |
-| `PAPER_TRADING` | Enable paper trading with virtual funds             | false                            |
-| `PAPER_STARTING_BALANCE` | Initial virtual balance                    | 1000                             |
-| `PAPER_FEE_RATE` | Simulated trading fee (0.001 = 0.1%)               | 0.001                            |
-| `USE_REDIS`     | Use Redis for persistence                           | false                            |
-| `REDIS_URL`     | Redis connection URL                                | redis://localhost:6379           |
-| `DATA_DIR`      | Directory for JSON persistence                      | ./data                           |
-| `LOG_LEVEL`     | Logging level                                       | info                             |
-| `DRY_RUN`       | Default dry-run mode                                | true                             |
+| Variable                 | Description                                         | Default                                       |
+| ------------------------ | --------------------------------------------------- | --------------------------------------------- |
+| `PRIVATE_KEY`            | Your wallet private key (required for live trading) | -                                             |
+| `CHAIN_ID`               | Network: 137 (Polygon) or 80001 (Mumbai)            | 137                                           |
+| `RPC_URL`                | Polygon RPC endpoint                                | https://polygon-rpc.com                       |
+| `CLOB_API_URL`           | Polymarket CLOB API (order execution)               | https://clob.polymarket.com                   |
+| `DATA_API_URL`           | Polymarket Data API (wallet activity)               | https://data-api.polymarket.com               |
+| `GAMMA_API_URL`          | Polymarket Gamma API (market metadata)              | https://gamma-api.polymarket.com              |
+| `WS_URL`                 | Real-time data WebSocket                            | wss://ws-subscriptions-clob.polymarket.com/ws |
+| `PAPER_TRADING`          | Enable paper trading with virtual funds             | false                                         |
+| `PAPER_STARTING_BALANCE` | Initial virtual balance                             | 1000                                          |
+| `PAPER_FEE_RATE`         | Simulated trading fee (0.001 = 0.1%)                | 0.001                                         |
+| `USE_REDIS`              | Use Redis for persistence                           | false                                         |
+| `REDIS_URL`              | Redis connection URL                                | redis://localhost:6379                        |
+| `DATA_DIR`               | Directory for JSON persistence                      | ./data                                        |
+| `LOG_LEVEL`              | Logging level                                       | info                                          |
+| `DRY_RUN`                | Default dry-run mode                                | true                                          |
 
 ### Polymarket API Endpoints
 
-| API         | URL                                              | Purpose                                |
-| ----------- | ------------------------------------------------ | -------------------------------------- |
-| **CLOB**    | https://clob.polymarket.com                      | Order placement, balances, order book  |
-| **Data**    | https://data-api.polymarket.com                  | Wallet activity history, trade lookup  |
-| **Gamma**   | https://gamma-api.polymarket.com                 | Market metadata, resolution status     |
-| **RTDS WS** | wss://ws-subscriptions-clob.polymarket.com/ws    | Real-time price updates, order fills   |
+| API         | URL                                           | Purpose                               |
+| ----------- | --------------------------------------------- | ------------------------------------- |
+| **CLOB**    | https://clob.polymarket.com                   | Order placement, balances, order book |
+| **Data**    | https://data-api.polymarket.com               | Wallet activity history, trade lookup |
+| **Gamma**   | https://gamma-api.polymarket.com              | Market metadata, resolution status    |
+| **RTDS WS** | wss://ws-subscriptions-clob.polymarket.com/ws | Real-time price updates, order fills  |
 
 ### Configuration Keys
 
@@ -422,10 +422,12 @@ pmcopy stats --json
 ### Market Resolution & Settlement
 
 Polymarket is a prediction market where:
+
 - **Winning shares** pay out $1.00 each
 - **Losing shares** pay out $0.00 each
 
 When markets resolve, paper trading automatically:
+
 1. Detects resolution via the Gamma API (`outcomePrices` field)
 2. Determines if your position won or lost
 3. Calculates P&L: `(shares × settlementPrice) - costBasis`
@@ -433,10 +435,12 @@ When markets resolve, paper trading automatically:
 5. Tracks win rate and settlement history
 
 **Example**: You buy 100 YES shares at $0.65 ($65 total). If YES wins:
+
 - Settlement value: 100 × $1.00 = $100
 - P&L: $100 - $65 = **+$35 profit**
 
 If YES loses:
+
 - Settlement value: 100 × $0.00 = $0
 - P&L: $0 - $65 = **-$65 loss**
 
@@ -455,6 +459,7 @@ pmcopy stats --watch --interval 30
 ```
 
 Live stats automatically:
+
 - Update position prices from current market data
 - Settle any newly resolved positions
 - Recalculate unrealized P&L
@@ -518,12 +523,12 @@ pmcopy stats --reset --balance 500
 
 The bot detects and handles multiple activity types from target wallets:
 
-| Type       | Description                                    | Action                           |
-| ---------- | ---------------------------------------------- | -------------------------------- |
-| `TRADE`    | Standard buy/sell order                        | Copy the trade                   |
-| `SPLIT`    | USDC split into YES + NO positions             | Buy both outcomes                |
-| `MERGE`    | YES + NO positions merged back to USDC         | Sell both outcomes               |
-| `REDEEM`   | Winning shares redeemed for $1                 | Auto-settled (market resolved)   |
+| Type     | Description                            | Action                         |
+| -------- | -------------------------------------- | ------------------------------ |
+| `TRADE`  | Standard buy/sell order                | Copy the trade                 |
+| `SPLIT`  | USDC split into YES + NO positions     | Buy both outcomes              |
+| `MERGE`  | YES + NO positions merged back to USDC | Sell both outcomes             |
+| `REDEEM` | Winning shares redeemed for $1         | Auto-settled (market resolved) |
 
 ### Trade Aggregation
 

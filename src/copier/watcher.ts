@@ -284,16 +284,19 @@ export class Watcher {
       agg.totalShares += signal.sizeShares || 0;
       agg.totalNotionalUsd += signal.notionalUsd || 0;
       agg.lastTimestamp = Math.max(agg.lastTimestamp, signal.timestamp);
-      
+
       // Recalculate average price
       const totalValue = agg.trades.reduce(
         (sum, t) => sum + t.price * (t.sizeShares || 0),
         0
       );
-      agg.avgPrice = agg.totalShares > 0 ? totalValue / agg.totalShares : signal.price;
+      agg.avgPrice =
+        agg.totalShares > 0 ? totalValue / agg.totalShares : signal.price;
 
       logger.debug(
-        `Aggregating ${activityType}: ${key} now has ${agg.trades.length} trades, $${agg.totalNotionalUsd.toFixed(2)}`
+        `Aggregating ${activityType}: ${key} now has ${
+          agg.trades.length
+        } trades, $${agg.totalNotionalUsd.toFixed(2)}`
       );
     } else {
       // Start new aggregation
@@ -340,7 +343,10 @@ export class Watcher {
   /**
    * Flush an aggregated trade - emit as a single trade event
    */
-  private async flushAggregatedTrade(target: string, key: string): Promise<void> {
+  private async flushAggregatedTrade(
+    target: string,
+    key: string
+  ): Promise<void> {
     const buffer = this.aggregationBuffers.get(target);
     if (!buffer || !buffer[key]) {
       return;

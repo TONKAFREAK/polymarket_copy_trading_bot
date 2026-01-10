@@ -81,13 +81,19 @@ export function createConfigCommand(): Command {
         const maxMarket = config.risk.maxUsdPerMarket;
         const maxDaily = config.risk.maxDailyUsdVolume;
         console.log(
-          `  ${chalk.cyan("maxUsdPerTrade:")} $${maxTrade > 1e9 ? "unlimited" : maxTrade.toLocaleString()}`
+          `  ${chalk.cyan("maxUsdPerTrade:")} $${
+            maxTrade > 1e9 ? "unlimited" : maxTrade.toLocaleString()
+          }`
         );
         console.log(
-          `  ${chalk.cyan("maxUsdPerMarket:")} $${maxMarket > 1e9 ? "unlimited" : maxMarket.toLocaleString()}`
+          `  ${chalk.cyan("maxUsdPerMarket:")} $${
+            maxMarket > 1e9 ? "unlimited" : maxMarket.toLocaleString()
+          }`
         );
         console.log(
-          `  ${chalk.cyan("maxDailyUsdVolume:")} $${maxDaily > 1e9 ? "unlimited" : maxDaily.toLocaleString()}`
+          `  ${chalk.cyan("maxDailyUsdVolume:")} $${
+            maxDaily > 1e9 ? "unlimited" : maxDaily.toLocaleString()
+          }`
         );
         console.log(
           `  ${chalk.cyan("dryRun:")} ${

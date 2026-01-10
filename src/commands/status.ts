@@ -91,13 +91,19 @@ export function createStatusCommand(): Command {
       const maxMarket = status.riskLimits.maxPerMarket;
       const maxDaily = status.riskLimits.maxDailyVolume;
       console.log(
-        `  ${chalk.cyan("Max per Trade:")} $${maxTrade > 1e9 ? "unlimited" : maxTrade.toLocaleString()}`
+        `  ${chalk.cyan("Max per Trade:")} $${
+          maxTrade > 1e9 ? "unlimited" : maxTrade.toLocaleString()
+        }`
       );
       console.log(
-        `  ${chalk.cyan("Max per Market:")} $${maxMarket > 1e9 ? "unlimited" : maxMarket.toLocaleString()}`
+        `  ${chalk.cyan("Max per Market:")} $${
+          maxMarket > 1e9 ? "unlimited" : maxMarket.toLocaleString()
+        }`
       );
       console.log(
-        `  ${chalk.cyan("Max Daily Volume:")} $${maxDaily > 1e9 ? "unlimited" : maxDaily.toLocaleString()}`
+        `  ${chalk.cyan("Max Daily Volume:")} $${
+          maxDaily > 1e9 ? "unlimited" : maxDaily.toLocaleString()
+        }`
       );
 
       console.log(chalk.gray("─".repeat(50)));
@@ -112,7 +118,7 @@ export function createStatusCommand(): Command {
           "Volume Used:"
         )} $${status.dailyStats.volumeUsed.toFixed(2)}`
       );
-      
+
       // Only show remaining and progress bar if there's an actual limit
       if (maxDaily <= 1e9) {
         console.log(

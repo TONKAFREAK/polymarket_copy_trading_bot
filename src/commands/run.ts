@@ -205,7 +205,7 @@ async function handleTradeDetected(
  */
 function displayConfig(config: AppConfig): void {
   const env = getEnvConfig();
-  
+
   console.log(chalk.bold("Configuration:"));
   console.log(chalk.gray("─".repeat(50)));
 
@@ -223,7 +223,11 @@ function displayConfig(config: AppConfig): void {
   } else if (config.trading.sizingMode === "fixed_shares") {
     console.log(`    Shares per Trade: ${config.trading.fixedSharesSize}`);
   } else {
-    console.log(`    Multiplier: ${(config.trading.proportionalMultiplier * 100).toFixed(0)}%`);
+    console.log(
+      `    Multiplier: ${(config.trading.proportionalMultiplier * 100).toFixed(
+        0
+      )}%`
+    );
   }
 
   console.log(
@@ -236,12 +240,24 @@ function displayConfig(config: AppConfig): void {
   const maxTrade = config.risk.maxUsdPerTrade;
   const maxMarket = config.risk.maxUsdPerMarket;
   const maxDaily = config.risk.maxDailyUsdVolume;
-  console.log(`    Max per Trade: $${maxTrade > 1e9 ? "unlimited" : maxTrade.toLocaleString()}`);
-  console.log(`    Max per Market: $${maxMarket > 1e9 ? "unlimited" : maxMarket.toLocaleString()}`);
-  console.log(`    Max Daily Volume: $${maxDaily > 1e9 ? "unlimited" : maxDaily.toLocaleString()}`);
+  console.log(
+    `    Max per Trade: $${
+      maxTrade > 1e9 ? "unlimited" : maxTrade.toLocaleString()
+    }`
+  );
+  console.log(
+    `    Max per Market: $${
+      maxMarket > 1e9 ? "unlimited" : maxMarket.toLocaleString()
+    }`
+  );
+  console.log(
+    `    Max Daily Volume: $${
+      maxDaily > 1e9 ? "unlimited" : maxDaily.toLocaleString()
+    }`
+  );
 
   console.log(`  ${chalk.cyan("Polling:")} ${config.polling.intervalMs}ms`);
-  
+
   // Show trading mode (Dry Run / Paper Trading / Live)
   let modeDisplay: string;
   if (config.risk.dryRun) {
@@ -252,7 +268,7 @@ function displayConfig(config: AppConfig): void {
     modeDisplay = chalk.red("LIVE TRADING (real money!)");
   }
   console.log(`  ${chalk.cyan("Mode:")} ${modeDisplay}`);
-  
+
   if (env.paperTrading && !config.risk.dryRun) {
     console.log(`    Starting Balance: $${env.paperStartingBalance}`);
     console.log(`    Fee Rate: ${(env.paperFeeRate * 100).toFixed(2)}%`);

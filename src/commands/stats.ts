@@ -16,7 +16,11 @@ export function createStatsCommand(): Command {
     .option("-c, --csv", "Export trades to CSV")
     .option("-r, --reset", "Reset paper trading account")
     .option("-w, --watch", "Live stats mode - auto-refresh every few seconds")
-    .option("-i, --interval <seconds>", "Refresh interval for watch mode (default: 10)", parseFloat)
+    .option(
+      "-i, --interval <seconds>",
+      "Refresh interval for watch mode (default: 10)",
+      parseFloat
+    )
     .option("-s, --settle", "Force settlement check for resolved markets")
     .option(
       "-b, --balance <amount>",
@@ -72,12 +76,18 @@ export function createStatsCommand(): Command {
 
       // Force settlement check
       if (options.settle) {
-        console.log(chalk.cyan("\n🔄 Checking for resolved markets to settle...\n"));
+        console.log(
+          chalk.cyan("\n🔄 Checking for resolved markets to settle...\n")
+        );
         const result = await paperManager.settleResolvedPositions();
         if (result.settled > 0) {
           console.log(chalk.green(`✅ Settled ${result.settled} position(s):`));
-          console.log(chalk.gray(`   Wins: ${result.wins}, Losses: ${result.losses}`));
-          console.log(chalk.gray(`   Total P&L: $${result.totalPnl.toFixed(2)}\n`));
+          console.log(
+            chalk.gray(`   Wins: ${result.wins}, Losses: ${result.losses}`)
+          );
+          console.log(
+            chalk.gray(`   Total P&L: $${result.totalPnl.toFixed(2)}\n`)
+          );
         } else {
           console.log(chalk.gray("No positions to settle.\n"));
         }
@@ -86,21 +96,34 @@ export function createStatsCommand(): Command {
       // Watch mode - live stats
       if (options.watch) {
         const interval = (options.interval || 10) * 1000;
-        console.log(chalk.cyan(`\n📊 Live Stats Mode - Refreshing every ${interval / 1000}s`));
+        console.log(
+          chalk.cyan(
+            `\n📊 Live Stats Mode - Refreshing every ${interval / 1000}s`
+          )
+        );
         console.log(chalk.gray("Press Ctrl+C to exit\n"));
 
         const updateStats = async () => {
           try {
             // Clear console (except on first run)
             console.clear();
-            console.log(chalk.cyan(`📊 Live Stats Mode - Refreshing every ${interval / 1000}s`));
-            console.log(chalk.gray(`Last updated: ${new Date().toLocaleTimeString()}`));
+            console.log(
+              chalk.cyan(
+                `📊 Live Stats Mode - Refreshing every ${interval / 1000}s`
+              )
+            );
+            console.log(
+              chalk.gray(`Last updated: ${new Date().toLocaleTimeString()}`)
+            );
             console.log(chalk.gray("Press Ctrl+C to exit\n"));
 
             await paperManager.updatePrices();
             console.log(paperManager.getFormattedStats());
           } catch (error) {
-            console.error(chalk.red("Error updating stats:"), (error as Error).message);
+            console.error(
+              chalk.red("Error updating stats:"),
+              (error as Error).message
+            );
           }
         };
 
@@ -168,7 +191,9 @@ export function createStatsCommand(): Command {
         chalk.gray("  pmcopy stats --watch -i 5    Live stats every 5 seconds")
       );
       console.log(
-        chalk.gray("  pmcopy stats --settle        Force settlement of resolved markets")
+        chalk.gray(
+          "  pmcopy stats --settle        Force settlement of resolved markets"
+        )
       );
       console.log(
         chalk.gray("  pmcopy stats --reset         Reset paper account")

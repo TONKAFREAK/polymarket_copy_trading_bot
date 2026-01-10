@@ -211,9 +211,7 @@ export class GammaApiClient {
    * Get market resolution info - determine if market is resolved and which outcome won
    * Returns: { resolved: boolean, winningOutcome: "YES" | "NO" | null, winningTokenId: string | null }
    */
-  async getMarketResolution(
-    slug: string
-  ): Promise<{
+  async getMarketResolution(slug: string): Promise<{
     resolved: boolean;
     winningOutcome: "YES" | "NO" | null;
     winningTokenId: string | null;
@@ -222,14 +220,24 @@ export class GammaApiClient {
     try {
       const market = await this.getMarketBySlug(slug);
       if (!market) {
-        return { resolved: false, winningOutcome: null, winningTokenId: null, outcomePrices: [] };
+        return {
+          resolved: false,
+          winningOutcome: null,
+          winningTokenId: null,
+          outcomePrices: [],
+        };
       }
 
       // Check if market is closed/resolved
       const isResolved = market.closed === true;
 
       if (!isResolved) {
-        return { resolved: false, winningOutcome: null, winningTokenId: null, outcomePrices: [] };
+        return {
+          resolved: false,
+          winningOutcome: null,
+          winningTokenId: null,
+          outcomePrices: [],
+        };
       }
 
       // Parse outcome prices to determine winner
@@ -245,7 +253,9 @@ export class GammaApiClient {
           if (market.outcomePrices.startsWith("[")) {
             outcomePrices = JSON.parse(market.outcomePrices);
           } else {
-            outcomePrices = market.outcomePrices.split(",").map((p) => parseFloat(p));
+            outcomePrices = market.outcomePrices
+              .split(",")
+              .map((p) => parseFloat(p));
           }
 
           // Determine winner based on which price is 1 (or closest to 1)
@@ -263,7 +273,10 @@ export class GammaApiClient {
             }
           }
         } catch {
-          logger.warn("Failed to parse outcomePrices", { slug, outcomePrices: market.outcomePrices });
+          logger.warn("Failed to parse outcomePrices", {
+            slug,
+            outcomePrices: market.outcomePrices,
+          });
         }
       }
 
@@ -283,10 +296,23 @@ export class GammaApiClient {
         }
       }
 
-      return { resolved: isResolved, winningOutcome, winningTokenId, outcomePrices };
+      return {
+        resolved: isResolved,
+        winningOutcome,
+        winningTokenId,
+        outcomePrices,
+      };
     } catch (error) {
-      logger.debug("Failed to get market resolution", { slug, error: (error as Error).message });
-      return { resolved: false, winningOutcome: null, winningTokenId: null, outcomePrices: [] };
+      logger.debug("Failed to get market resolution", {
+        slug,
+        error: (error as Error).message,
+      });
+      return {
+        resolved: false,
+        winningOutcome: null,
+        winningTokenId: null,
+        outcomePrices: [],
+      };
     }
   }
 

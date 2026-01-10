@@ -12,7 +12,7 @@ import { SizingMode } from "../copier/types";
 export function createInitCommand(): Command {
   // Get env config to use as defaults
   const env = getEnvConfig();
-  
+
   const command = new Command("init")
     .description("Initialize the Polymarket copy trader configuration")
     .option(
@@ -152,7 +152,11 @@ export function createInitCommand(): Command {
         } else if (sizingMode === "fixed_shares") {
           console.log(`  ${chalk.cyan("Shares per Trade:")} ${options.shares}`);
         } else if (sizingMode === "proportional") {
-          console.log(`  ${chalk.cyan("Proportional Multiplier:")} ${(parseFloat(options.multiplier) * 100).toFixed(0)}%`);
+          console.log(
+            `  ${chalk.cyan("Proportional Multiplier:")} ${(
+              parseFloat(options.multiplier) * 100
+            ).toFixed(0)}%`
+          );
         }
 
         console.log(
@@ -160,18 +164,30 @@ export function createInitCommand(): Command {
             parseFloat(options.slippage) * 100
           ).toFixed(1)}%`
         );
-        
+
         console.log(chalk.gray("\n  Risk Limits:"));
         const maxTrade = parseFloat(options.maxUsdPerTrade);
         const maxMarket = parseFloat(options.maxUsdPerMarket);
         const maxDaily = parseFloat(options.maxDailyVolume);
-        console.log(`    ${chalk.cyan("Max USD/Trade:")} $${maxTrade > 1e9 ? "unlimited" : maxTrade.toLocaleString()}`);
-        console.log(`    ${chalk.cyan("Max USD/Market:")} $${maxMarket > 1e9 ? "unlimited" : maxMarket.toLocaleString()}`);
-        console.log(`    ${chalk.cyan("Max Daily Volume:")} $${maxDaily > 1e9 ? "unlimited" : maxDaily.toLocaleString()}`);
-        
+        console.log(
+          `    ${chalk.cyan("Max USD/Trade:")} $${
+            maxTrade > 1e9 ? "unlimited" : maxTrade.toLocaleString()
+          }`
+        );
+        console.log(
+          `    ${chalk.cyan("Max USD/Market:")} $${
+            maxMarket > 1e9 ? "unlimited" : maxMarket.toLocaleString()
+          }`
+        );
+        console.log(
+          `    ${chalk.cyan("Max Daily Volume:")} $${
+            maxDaily > 1e9 ? "unlimited" : maxDaily.toLocaleString()
+          }`
+        );
+
         console.log(chalk.gray("\n  Polling:"));
         console.log(`    ${chalk.cyan("Interval:")} ${options.pollInterval}ms`);
-        
+
         console.log(
           `\n  ${chalk.cyan("Mode:")} ${
             options.dryRun

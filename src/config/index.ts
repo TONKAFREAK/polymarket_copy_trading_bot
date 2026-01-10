@@ -366,7 +366,7 @@ export class ConfigManager {
     if (options.targets) {
       this.setTargets(options.targets);
     }
-    
+
     // Trading config
     if (options.sizingMode) {
       this.config.trading.sizingMode = options.sizingMode;
@@ -374,35 +374,54 @@ export class ConfigManager {
     if (options.fixedUsdSize !== undefined && !isNaN(options.fixedUsdSize)) {
       this.config.trading.fixedUsdSize = options.fixedUsdSize;
     }
-    if (options.fixedSharesSize !== undefined && !isNaN(options.fixedSharesSize)) {
+    if (
+      options.fixedSharesSize !== undefined &&
+      !isNaN(options.fixedSharesSize)
+    ) {
       this.config.trading.fixedSharesSize = options.fixedSharesSize;
     }
-    if (options.proportionalMultiplier !== undefined && !isNaN(options.proportionalMultiplier)) {
-      this.config.trading.proportionalMultiplier = options.proportionalMultiplier;
+    if (
+      options.proportionalMultiplier !== undefined &&
+      !isNaN(options.proportionalMultiplier)
+    ) {
+      this.config.trading.proportionalMultiplier =
+        options.proportionalMultiplier;
     }
     if (options.slippage !== undefined && !isNaN(options.slippage)) {
       this.config.trading.slippage = options.slippage;
     }
-    
+
     // Risk config
-    if (options.maxUsdPerTrade !== undefined && !isNaN(options.maxUsdPerTrade)) {
+    if (
+      options.maxUsdPerTrade !== undefined &&
+      !isNaN(options.maxUsdPerTrade)
+    ) {
       this.config.risk.maxUsdPerTrade = options.maxUsdPerTrade;
     }
-    if (options.maxUsdPerMarket !== undefined && !isNaN(options.maxUsdPerMarket)) {
+    if (
+      options.maxUsdPerMarket !== undefined &&
+      !isNaN(options.maxUsdPerMarket)
+    ) {
       this.config.risk.maxUsdPerMarket = options.maxUsdPerMarket;
     }
-    if (options.maxDailyUsdVolume !== undefined && !isNaN(options.maxDailyUsdVolume)) {
+    if (
+      options.maxDailyUsdVolume !== undefined &&
+      !isNaN(options.maxDailyUsdVolume)
+    ) {
       this.config.risk.maxDailyUsdVolume = options.maxDailyUsdVolume;
     }
     if (options.dryRun !== undefined) {
       this.config.risk.dryRun = options.dryRun;
     }
-    
+
     // Polling config
-    if (options.pollIntervalMs !== undefined && !isNaN(options.pollIntervalMs)) {
+    if (
+      options.pollIntervalMs !== undefined &&
+      !isNaN(options.pollIntervalMs)
+    ) {
       this.config.polling.intervalMs = options.pollIntervalMs;
     }
-    
+
     this.save();
   }
 

@@ -400,7 +400,9 @@ export class PaperTradingManager {
 
       try {
         // Check if market is resolved
-        const resolution = await gammaApi.getMarketResolution(position.marketSlug);
+        const resolution = await gammaApi.getMarketResolution(
+          position.marketSlug
+        );
 
         if (!resolution.resolved) {
           continue; // Market not resolved yet
@@ -467,10 +469,12 @@ export class PaperTradingManager {
     }
 
     // Update win rate
-    const totalClosedTrades = this.state.stats.winningTrades + this.state.stats.losingTrades;
-    this.state.stats.winRate = totalClosedTrades > 0
-      ? (this.state.stats.winningTrades / totalClosedTrades) * 100
-      : 0;
+    const totalClosedTrades =
+      this.state.stats.winningTrades + this.state.stats.losingTrades;
+    this.state.stats.winRate =
+      totalClosedTrades > 0
+        ? (this.state.stats.winningTrades / totalClosedTrades) * 100
+        : 0;
 
     // Calculate profit factor
     const totalWins = Object.values(this.state.positions)
@@ -481,11 +485,17 @@ export class PaperTradingManager {
         .filter((p) => p.settlementPnl && p.settlementPnl < 0)
         .reduce((sum, p) => sum + (p.settlementPnl || 0), 0)
     );
-    this.state.stats.profitFactor = totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? Infinity : 0;
+    this.state.stats.profitFactor =
+      totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? Infinity : 0;
 
     this.saveState();
 
-    return { settled: settledCount, totalPnl: totalSettlementPnl, wins, losses };
+    return {
+      settled: settledCount,
+      totalPnl: totalSettlementPnl,
+      wins,
+      losses,
+    };
   }
 
   /**
@@ -534,7 +544,9 @@ export class PaperTradingManager {
             try {
               const prices = market.outcomePrices.startsWith("[")
                 ? JSON.parse(market.outcomePrices)
-                : market.outcomePrices.split(",").map((p: string) => parseFloat(p));
+                : market.outcomePrices
+                    .split(",")
+                    .map((p: string) => parseFloat(p));
               const outcomeIndex = position.outcome === "YES" ? 0 : 1;
               if (prices[outcomeIndex] !== undefined) {
                 currentPrice = prices[outcomeIndex];

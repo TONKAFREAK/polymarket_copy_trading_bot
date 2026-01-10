@@ -16,7 +16,7 @@ const logger = getLogger();
  * - SPLIT: Split collateral into YES/NO tokens (creates position)
  * - MERGE: Merge YES+NO tokens back into collateral (closes positions)
  * - REDEEM: Redeem winning tokens after market resolution
- * 
+ *
  * Activity types we skip:
  * - REWARD: Liquidity rewards (not actionable)
  * - CONVERSION: Token conversion (internal)
@@ -24,14 +24,14 @@ const logger = getLogger();
  */
 const COPYABLE_ACTIVITY_TYPES = new Set<string>([
   "TRADE",
-  "SPLIT", 
+  "SPLIT",
   "MERGE",
   "REDEEM",
 ]);
 
 const SKIPPED_ACTIVITY_TYPES = new Set<string>([
   "REWARD",
-  "CONVERSION", 
+  "CONVERSION",
   "MAKER_REBATE",
 ]);
 
@@ -96,26 +96,25 @@ export class DataApiClient {
       // Filter to only copyable activity types
       const activities = (response || []).filter((item) => {
         const actType = item.type?.toUpperCase() || "TRADE";
-        
+
         if (COPYABLE_ACTIVITY_TYPES.has(actType)) {
           return true;
         }
-        
+
         if (SKIPPED_ACTIVITY_TYPES.has(actType)) {
           logger.debug(`Skipping non-copyable activity type: ${actType}`);
           return false;
         }
-        
+
         // Unknown type - log and skip
         logger.warn(`Unknown activity type: ${actType}`, { activity: item });
         return false;
       });
 
       logger.debug(
-        `Fetched ${activities.length} copyable activities for ${walletAddress.substring(
-          0,
-          10
-        )}...`
+        `Fetched ${
+          activities.length
+        } copyable activities for ${walletAddress.substring(0, 10)}...`
       );
 
       return activities;

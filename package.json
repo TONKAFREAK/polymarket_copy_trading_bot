@@ -1,0 +1,46 @@
+{
+  "name": "polymarket-copy-trader",
+  "version": "1.0.0",
+  "description": "CLI copy-trading bot for Polymarket using CLOB API",
+  "main": "dist/cli.js",
+  "bin": {
+    "pmcopy": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "clean": "rimraf dist",
+    "lint": "eslint src/**/*.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "polymarket",
+    "trading",
+    "copy-trading",
+    "clob",
+    "prediction-markets"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@polymarket/clob-client": "^4.4.0",
+    "axios": "^1.6.7",
+    "chalk": "^4.1.2",
+    "commander": "^12.0.0",
+    "dotenv": "^16.4.1",
+    "ethers": "^5.7.2",
+    "ioredis": "^5.3.2",
+    "ora": "^5.4.1",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.16",
+    "rimraf": "^5.0.5",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

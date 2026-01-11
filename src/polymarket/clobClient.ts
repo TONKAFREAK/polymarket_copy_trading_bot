@@ -222,14 +222,14 @@ export class ClobClientWrapper {
 
       // Use createAndPostOrder for atomic order creation and posting
       // This is the recommended method per Polymarket docs
-      // feeRateBps: 0 = maker order (no fees), helps get fills at exact price
+      // feeRateBps: minimal fee (1 bps = 0.01%) - 0 is invalid per API
       const response = await this.client.createAndPostOrder(
         {
           tokenID: request.tokenId,
           side: request.side === "BUY" ? Side.BUY : Side.SELL,
           price: request.price,
           size: request.size,
-          feeRateBps: 0, // Zero fees = maker order for better fills
+          feeRateBps: 1, // Minimal fee (0.01%) to satisfy API requirement
         },
         {
           tickSize,

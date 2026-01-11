@@ -68,6 +68,7 @@ export interface TradeLogEntry {
   // For non-trade logs
   message?: string;
   details?: string;
+  question?: string;
 }
 
 export class DashboardV3 {
@@ -391,6 +392,7 @@ export class DashboardV3 {
     yourShares?: number;
     yourPrice?: number;
     orderId?: string;
+    question?: string;
   }): void {
     const targetTotal = entry.targetShares * entry.targetPrice;
     const yourTotal = (entry.yourShares || 0) * (entry.yourPrice || 0);
@@ -410,6 +412,7 @@ export class DashboardV3 {
       marketName: entry.marketName,
       copied: entry.copied,
       copyError: entry.copyError,
+      question: entry.question,
     });
 
     if (this.logs.length > MAX_LOG_ENTRIES) {
@@ -698,7 +701,7 @@ export class DashboardV3 {
 
         // Line 2: Market question (full name, wrapped if needed)
         const marketName = pos.market || "Unknown Market";
-        targetLog.log(`  ${marketName}`);
+        targetLog.log(`  {white-fg}${marketName}{/}`);
       }
 
       // Legend at bottom
@@ -788,7 +791,7 @@ export class DashboardV3 {
     }
 
     // Format market name
-    let market = entry.details || "Unknown";
+    let market = entry.marketName || "Unknown";
     // if (market.length > 25) {
     //   market = market.substring(0, 22) + "...";
     // }

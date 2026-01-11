@@ -455,41 +455,36 @@ async function handleTradeDetected(
     | null,
   gammaApi: import("../polymarket/gammaApi").GammaApiClient
 ): Promise<{ success: boolean; value: number } | null> {
-  // Try to fetch market name from Gamma API
-  let marketName = signal.marketSlug || "";
+  // Always try to fetch the proper market question from Gamma API
+  let marketName = "";
 
-  if (!marketName || marketName.length < 5) {
-    try {
-      // Try by token ID first
-      if (signal.tokenId && signal.tokenId.length > 20) {
-        const market = await gammaApi.getMarketByTokenId(signal.tokenId);
-        if (market) {
-          marketName =
-            market.question || market.slug || signal.tokenId.substring(0, 30);
-        }
-      } else if (signal.conditionId) {
-        const market = await gammaApi.getMarketByConditionId(
-          signal.conditionId
-        );
-        if (market) {
-          marketName =
-            market.question ||
-            market.slug ||
-            signal.conditionId.substring(0, 30);
-        }
+  try {
+    // Try by token ID first (most reliable)
+    if (signal.tokenId && signal.tokenId.length > 20) {
+      const market = await gammaApi.getMarketByTokenId(signal.tokenId);
+      if (market && market.question) {
+        marketName = market.question;
       }
-    } catch {
-      // Silently use fallback
     }
+
+    // Fallback to condition ID if token lookup failed
+    if (!marketName && signal.conditionId) {
+      const market = await gammaApi.getMarketByConditionId(signal.conditionId);
+      if (market && market.question) {
+        marketName = market.question;
+      }
+    }
+  } catch {
+    // Silently use fallback
   }
 
-  // Clean up market name for display
+  // Final fallback to slug or token ID
   if (!marketName) {
-    marketName = signal.tokenId
-      ? signal.tokenId.substring(0, 25) + "..."
-      : "Unknown Market";
-  } else if (marketName.length > 60) {
-    marketName = marketName.substring(0, 57) + "...";
+    marketName =
+      signal.marketSlug ||
+      (signal.tokenId
+        ? signal.tokenId.substring(0, 25) + "..."
+        : "Unknown Market");
   }
 
   // Execute the trade

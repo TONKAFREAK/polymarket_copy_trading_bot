@@ -329,10 +329,32 @@ export class Executor {
     signal: TradeSignal,
     timestamp: number
   ): Promise<ExecutionResult> {
+    // Fetch market info to get the proper market name and conditionId
+    const { getGammaApiClient } = await import("../polymarket/gammaApi");
+    const gammaApi = getGammaApiClient();
+
+    let marketName = signal.marketSlug || "Unknown";
+    let conditionId = signal.conditionId;
+
+    // Always try to get market info from token ID for accurate data
+    if (signal.tokenId && signal.tokenId.length > 20) {
+      try {
+        const marketInfo = await gammaApi.getMarketByTokenId(signal.tokenId);
+        if (marketInfo) {
+          marketName = String(
+            marketInfo.question || marketInfo.title || marketName
+          );
+          conditionId = conditionId || marketInfo.conditionId;
+        }
+      } catch {
+        // Ignore errors
+      }
+    }
+
     logger.info("Processing REDEEM activity", {
-      market: signal.marketSlug,
+      market: marketName,
       tokenId: signal.tokenId?.substring(0, 16) + "...",
-      price: signal.price,
+      conditionId: conditionId?.substring(0, 20) + "...",
     });
 
     // For paper trading, settle the position
@@ -366,25 +388,12 @@ export class Executor {
     }
 
     // For live trading, find and redeem ALL our positions in the same market
-    if (signal.tokenId || signal.conditionId) {
+    if (signal.tokenId || conditionId) {
       try {
         const { redeemByTokenId } = await import("../commands/redeem");
-        const { getGammaApiClient } = await import("../polymarket/gammaApi");
-        const gammaApi = getGammaApiClient();
 
-        // Get the conditionId from the target's token
-        let targetConditionId = signal.conditionId;
-        let marketName = signal.marketSlug || "Unknown";
-
-        if (!targetConditionId && signal.tokenId) {
-          const marketInfo = await gammaApi.getMarketByTokenId(signal.tokenId);
-          if (marketInfo) {
-            targetConditionId = marketInfo.conditionId;
-            marketName = String(
-              marketInfo.question || marketInfo.title || marketName
-            );
-          }
-        }
+        // Use the conditionId we already fetched above
+        const targetConditionId = conditionId;
 
         if (!targetConditionId) {
           logger.warn("REDEEM: Could not find conditionId for market", {
@@ -404,11 +413,24 @@ export class Executor {
           conditionId: targetConditionId.substring(0, 20) + "...",
         });
 
-        // Get our positions and find ones matching this conditionId
+        // Get our positions and find ones matching this conditionId OR market name
         const { positions } = await this.getPositions();
-        const matchingPositions = positions.filter(
+        let matchingPositions = positions.filter(
           (pos) => pos.conditionId === targetConditionId && pos.shares > 0
         );
+
+        // Fallback: if no positions match by conditionId, try matching by market name
+        if (matchingPositions.length === 0) {
+          matchingPositions = positions.filter(
+            (pos) => pos.market === marketName && pos.shares > 0
+          );
+          if (matchingPositions.length > 0) {
+            logger.info("REDEEM: Matched positions by market name fallback", {
+              market: marketName,
+              positionCount: matchingPositions.length,
+            });
+          }
+        }
 
         if (matchingPositions.length === 0) {
           logger.info("REDEEM: No matching positions found in this market", {

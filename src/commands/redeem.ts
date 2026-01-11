@@ -270,7 +270,7 @@ export async function redeemWinnings(): Promise<void> {
         )}`
       );
       console.log(`   ${marketName}`);
-      console.log(`   Token: ${pos.tokenId.substring(0, 20)}...`);
+      console.log(`   Token: ${pos.tokenId}`);
 
       if (isResolved && conditionId) {
         console.log(`   🎫 REDEEMABLE`);

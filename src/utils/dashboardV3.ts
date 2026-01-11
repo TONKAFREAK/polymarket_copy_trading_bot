@@ -42,6 +42,7 @@ export interface LivePosition {
 
 export interface TradeLogEntry {
   timestamp: number;
+  targetTradeTime?: number; // When the target filled the trade
   type:
     | "copy"
     | "skip"
@@ -339,9 +340,13 @@ export class DashboardV3 {
       return;
     }
 
-    // Suppress other common library noise
+    // Suppress network and library noise
     if (
       message.includes("request error") ||
+      message.includes("ECONNRESET") ||
+      message.includes("ETIMEDOUT") ||
+      message.includes("ECONNREFUSED") ||
+      message.includes("socket hang up") ||
       message.includes("axios") ||
       message.includes("transitional")
     ) {
@@ -396,12 +401,14 @@ export class DashboardV3 {
     yourPrice?: number;
     orderId?: string;
     question?: string;
+    targetTradeTime?: number; // When target filled the trade
   }): void {
     const targetTotal = entry.targetShares * entry.targetPrice;
     const yourTotal = (entry.yourShares || 0) * (entry.yourPrice || 0);
 
     this.logs.unshift({
       timestamp: Date.now(),
+      targetTradeTime: entry.targetTradeTime,
       type: entry.copied ? "copy" : entry.copyError ? "error" : "skip",
       activityType: entry.activityType,
       side: entry.side,
@@ -594,7 +601,7 @@ export class DashboardV3 {
     const title = "{bold}{cyan-fg}POLYMARKET COPY TRADER{/}";
     const status = `${modeTag}  {cyan-fg}Uptime:{/} ${uptimeStr.padEnd(
       10
-    )}  {yellow-fg}Targets:{/} ${this.stats.targetsCount}  {gray-fg}Poll:{/} ${
+    )}  {yellow-fg}Targets:{/} ${this.stats.targetsCount}  {white-fg}Poll:{/} ${
       this.stats.pollingInterval
     }ms`;
 
@@ -640,11 +647,11 @@ export class DashboardV3 {
       `{cyan-fg}Cash Balance:{/}   ${fmtMoney(this.stats.balance)}`,
       `{cyan-fg}Positions:{/}      ${fmtMoney(
         this.stats.positionsValue
-      )} {gray-fg}(${this.stats.openPositions}){/}`,
+      )} {white-fg}(${this.stats.openPositions}){/}`,
       // `{cyan-fg}Portfolio:{/}      ${fmtMoney(portfolioValue)} ${colorPct(
       //   returnPct
       // )}`,
-      // `{gray-fg}─────────────────────────{/}`,
+      // `{white-fg}─────────────────────────{/}`,
       // `{cyan-fg}Realized PnL:{/}   ${colorMoney(this.stats.realizedPnl)}`,
       // `{cyan-fg}Unrealized:{/}     ${colorMoney(this.stats.unrealizedPnl)}`,
       // `{cyan-fg}Total PnL:{/}      ${colorMoney(totalPnl)}`,
@@ -700,7 +707,7 @@ export class DashboardV3 {
 
         // Line 1: Status, Side, Shares, Value
         targetLog.log(
-          `${statusIcon} {${sideColor}-fg}${sideStr}{/} ${sharesStr} ${valueStr} {gray-fg}${feeStr}{/}`
+          `${statusIcon} {${sideColor}-fg}${sideStr}{/} ${sharesStr} ${valueStr} {white-fg}${feeStr}{/}`
         );
 
         // Line 2: Market question (full name, wrapped if needed)
@@ -709,7 +716,7 @@ export class DashboardV3 {
       }
 
       // Legend at bottom
-      // targetLog.log(`{gray-fg}─────────────────────────────────{/}`);
+      // targetLog.log(`{white-fg}─────────────────────────────────{/}`);
       // targetLog.log(
       //   `{cyan-fg}●{/}Open {green-fg}✓{/}Redeemable {yellow-fg}○{/}Lost`
       // );
@@ -718,7 +725,7 @@ export class DashboardV3 {
       this.targetBox.setLabel(" 🎯 Targets ");
 
       if (this.targetAddresses.length === 0) {
-        targetLog.log("{gray-fg}No targets configured{/}");
+        targetLog.log("{white-fg}No targets configured{/}");
       } else {
         for (let i = 0; i < this.targetAddresses.length; i++) {
           const addr = this.targetAddresses[i];
@@ -733,7 +740,7 @@ export class DashboardV3 {
     }
 
     // // Add trading stats at the bottom
-    // targetLog.log(`{gray-fg}─────────────────────────────────{/}`);
+    // targetLog.log(`{white-fg}─────────────────────────────────{/}`);
     // targetLog.log(
     //   `{cyan-fg}Trades:{/} ${String(this.stats.totalTrades).padStart(
     //     4
@@ -752,14 +759,15 @@ export class DashboardV3 {
     const lastUpdateStr = this.formatTime(this.stats.lastUpdate);
     const feesStr =
       this.stats.totalFees > 0
-        ? `{white-fg}-$${this.stats.totalFees.toFixed(2)}{/}`
+        ? `{white-fg}-$${this.stats.totalFees.toFixed(2)}  |  {/}`
         : "{white-fg}$0.00  |  {/}";
 
     const content =
       `{white-fg}Updated: ${lastUpdateStr}  |  {/}` +
       `{white-fg}Fees: ${feesStr}  |  {/}` +
       `{white-fg}Press 'Q' or Ctrl+C to exit  |  {/}` +
-      `{white-fg}Scroll: Up/Down or PgUp/PgDn{/}`;
+      `{white-fg}Scroll Activity: Up/Down  |  {/}` +
+      `{white-fg}Scroll Holdings: PgUp/PgDn{/}`;
 
     // Only update if content changed (prevents flickering)
     if (content !== this.lastStatusBarContent) {
@@ -801,15 +809,32 @@ export class DashboardV3 {
     let market = entry.marketName || entry.question || "Unknown";
 
     // Line 1: Target's action
-    const targetShares = entry.targetShares?.toFixed(1) || "0.0";
-    const targetPrice = entry.targetPrice?.toFixed(2) || "0.00";
-    const targetTotal = entry.targetTotal?.toFixed(2) || "0.00";
+    // For REDEEM, target shares/price from API may be 0, show simplified line
+    let line1 = `{white-fg}${time}{/} ${activityIcon} {yellow-fg}TARGET:{/} `;
 
-    let line1 = `{gray-fg}${time}{/} ${activityIcon} {yellow-fg}TARGET:{/} `;
-    line1 += `${targetShares.padStart(
-      5
-    )} @ $${targetPrice} -- $${targetTotal.padStart(5)}`;
-    line1 += ` {magenta-fg}${market}{/}`;
+    if (entry.activityType === "REDEEM") {
+      // REDEEM: just show "redeemed" without 0 values
+      line1 += `{white-fg}redeemed{/} {magenta-fg}${market}{/}`;
+    } else {
+      const targetShares = entry.targetShares?.toFixed(1) || "0.0";
+      const targetPrice = entry.targetPrice?.toFixed(2) || "0.00";
+      const targetTotal = entry.targetTotal?.toFixed(2) || "0.00";
+      line1 += `${targetShares.padStart(
+        5
+      )} @ $${targetPrice} -- $${targetTotal.padStart(5)}`;
+      line1 += ` {magenta-fg}${market}{/}`;
+    }
+
+    // Add target's fill time and latency if available
+    if (entry.targetTradeTime) {
+      const targetTime = this.formatTime(entry.targetTradeTime);
+      line1 += ` {white-fg}@ ${targetTime}{/}`;
+
+      // Calculate latency (our detection time - target fill time)
+      const latencyMs = entry.timestamp - entry.targetTradeTime;
+      const latencyStr = this.formatLatency(latencyMs);
+      line1 += ` {red-fg}(${latencyStr}){/}`;
+    }
 
     this.logBox.log(line1);
 
@@ -818,11 +843,18 @@ export class DashboardV3 {
     if (entry.copied) {
       if (entry.activityType === "REDEEM") {
         // For REDEEM: yourPrice = USDC gained, yourShares = positions redeemed
-        const usdcGained = entry.yourPrice?.toFixed(2) || "0.00";
+        const usdcGained = entry.yourPrice || 0;
         const posCount = entry.yourShares?.toFixed(0) || "1";
-        line2 += `{green-fg}→ REDEEMED:{/} {white-fg}+$${usdcGained}{/} (${posCount} position${
-          Number(posCount) !== 1 ? "s" : ""
-        })`;
+        if (usdcGained > 0) {
+          line2 += `{green-fg}→ REDEEMED:{/} {white-fg}+$${usdcGained.toFixed(
+            2
+          )}{/} (${posCount} position${Number(posCount) !== 1 ? "s" : ""})`;
+        } else {
+          // No USDC gained - likely a losing position or already redeemed
+          line2 += `{yellow-fg}→ REDEEMED:{/} {white-fg}no payout{/} (${posCount} position${
+            Number(posCount) !== 1 ? "s" : ""
+          })`;
+        }
       } else {
         // For regular trades
         const yourShares = entry.yourShares?.toFixed(1) || "0.0";
@@ -830,14 +862,32 @@ export class DashboardV3 {
         const yourTotal = entry.yourTotal?.toFixed(2) || "0.00";
         line2 += `{green-fg}→ COPIED:{/} ${yourShares.padStart(
           5
-        )}@$${yourPrice}={white-fg}$${yourTotal.padStart(5)}{/}`;
+        )} @ $${yourPrice} -- {white-fg}$${yourTotal.padStart(5)}{/}`;
       }
     } else if (entry.copyError) {
-      // Error
+      // Error - clean up common error types for display
+      let cleanError = entry.copyError;
+
+      // Detect HTML error pages (Cloudflare/WAF blocks, rate limiting)
+      if (cleanError.includes("<!DOCTYPE") || cleanError.includes("<html")) {
+        cleanError = "API blocked (rate limited)";
+      }
+      // Clean up connection errors
+      else if (
+        cleanError.includes("ECONNRESET") ||
+        cleanError.includes("ETIMEDOUT")
+      ) {
+        cleanError = "connection error (retrying)";
+      }
+      // Clean up socket errors
+      else if (cleanError.includes("socket hang up")) {
+        cleanError = "connection dropped";
+      }
+
       const shortError =
-        entry.copyError.length > 35
-          ? entry.copyError.substring(0, 32) + "..."
-          : entry.copyError;
+        cleanError.length > 35
+          ? cleanError.substring(0, 32) + "..."
+          : cleanError;
       line2 += `{red-fg}→ ERROR:{/} ${shortError}`;
     } else {
       // Skipped
@@ -860,7 +910,7 @@ export class DashboardV3 {
     }
 
     // Build structured log line - simpler format for alignment
-    let line = `{gray-fg}${time}{/} ${sideIcon}`;
+    let line = `{white-fg}${time}{/} ${sideIcon}`;
 
     // Show your order details (primary info)
     if (entry.yourShares !== undefined && entry.yourPrice !== undefined) {
@@ -869,8 +919,8 @@ export class DashboardV3 {
         (entry.yourShares * entry.yourPrice).toFixed(2);
       line += ` ${entry.yourShares
         .toFixed(1)
-        .padStart(5)}@$${entry.yourPrice.toFixed(2)}`;
-      line += `={white-fg}$${yourTotal.padStart(6)}{/}`;
+        .padStart(5)} @ $${entry.yourPrice.toFixed(2)}`;
+      line += `-- {white-fg}$${yourTotal.padStart(6)}{/}`;
     }
 
     // Show market name
@@ -886,6 +936,24 @@ export class DashboardV3 {
     details?: string
   ): void {
     const time = this.formatTime(Date.now());
+
+    // Clean up error messages for display
+    let cleanMessage = message;
+    if (type === "error") {
+      if (
+        cleanMessage.includes("<!DOCTYPE") ||
+        cleanMessage.includes("<html")
+      ) {
+        cleanMessage = "API blocked (rate limited)";
+      } else if (
+        cleanMessage.includes("ECONNRESET") ||
+        cleanMessage.includes("ETIMEDOUT")
+      ) {
+        cleanMessage = "Connection error (retrying)";
+      } else if (cleanMessage.includes("socket hang up")) {
+        cleanMessage = "Connection dropped";
+      }
+    }
 
     let prefix: string;
     let color: string;
@@ -916,12 +984,12 @@ export class DashboardV3 {
         color = "white";
     }
 
-    let line = `{gray-fg}${time}{/} {${color}-fg}${prefix}{/} ${message}`;
+    let line = `{white-fg}${time}{/} {${color}-fg}${prefix}{/} ${cleanMessage}`;
     if (details) {
       // Truncate details if too long
       const shortDetails =
         details.length > 35 ? details.substring(0, 32) + "..." : details;
-      line += ` {gray-fg}| ${shortDetails}{/}`;
+      line += ` {white-fg}| ${shortDetails}{/}`;
     }
 
     this.logBox.log(line);
@@ -950,6 +1018,15 @@ export class DashboardV3 {
       minute: "2-digit",
       second: "2-digit",
     });
+  }
+
+  private formatLatency(ms: number): string {
+    if (ms < 1000) {
+      return `${ms}ms`;
+    } else {
+      const seconds = (ms / 1000).toFixed(2);
+      return `${seconds}s`;
+    }
   }
 }
 

@@ -264,11 +264,43 @@ export class Watcher {
   /**
    * Add a trade to the aggregation buffer
    * Trades on the same tokenId+side+activityType within the window are combined
+   * If AGGREGATION_WINDOW_MS is 0, emit trades individually without aggregation
    */
   private async addToAggregationBuffer(
     target: string,
     signal: TradeSignal
   ): Promise<void> {
+    // If aggregation is disabled (window = 0), emit trade immediately without buffering
+    if (AGGREGATION_WINDOW_MS === 0) {
+      logger.debug(
+        `Emitting trade individually (no aggregation): ${signal.tradeId.substring(
+          0,
+          20
+        )}...`
+      );
+
+      logTradeDetected(
+        logger,
+        signal.targetWallet,
+        signal.tradeId,
+        signal.side,
+        signal.price,
+        signal.tokenId
+      );
+
+      this.stateManager.recordTradeDetected(signal);
+
+      try {
+        await this.events.onTradeDetected(signal);
+      } catch (error) {
+        this.events.onError(
+          error as Error,
+          `Processing trade ${signal.tradeId}`
+        );
+      }
+      return;
+    }
+
     // Get or create buffer for this target
     if (!this.aggregationBuffers.has(target)) {
       this.aggregationBuffers.set(target, {});

@@ -230,6 +230,9 @@ export function createRunCommand(): Command {
           successCount: 0,
         };
 
+        // Track positions we've already attempted to redeem (to avoid spam)
+        const redeemedTokenIds = new Set<string>();
+
         // Helper to get active dashboard for logging
         const getActiveDashboard = () => dashboardV3 || dashboard;
 
@@ -366,6 +369,57 @@ export function createRunCommand(): Command {
                         feesPaid: p.feesPaid,
                       }));
                     dashboardV3.setPositions(livePositions);
+
+                    // Auto-redeem any positions that are redeemable (and not already attempted)
+                    const redeemablePositions = positionsData.positions.filter(
+                      (p) =>
+                        p.isRedeemable &&
+                        p.shares > 0 &&
+                        !redeemedTokenIds.has(p.tokenId)
+                    );
+                    if (redeemablePositions.length > 0) {
+                      // Import redeem function
+                      const { redeemByTokenId } = await import("./redeem");
+
+                      for (const pos of redeemablePositions) {
+                        // Mark as attempted before trying (prevents re-attempts on next refresh)
+                        redeemedTokenIds.add(pos.tokenId);
+
+                        try {
+                          dashboardV3.logInfo(
+                            "Auto-redeeming resolved position",
+                            `${pos.outcome} - ${pos.market.substring(0, 40)}...`
+                          );
+
+                          const redeemResult = await redeemByTokenId(
+                            pos.tokenId
+                          );
+
+                          if (redeemResult.success) {
+                            dashboardV3.logRedeem(
+                              pos.market,
+                              redeemResult.usdcGained
+                            );
+                          } else {
+                            dashboardV3.logError(
+                              `Redeem failed: ${redeemResult.error?.substring(
+                                0,
+                                50
+                              )}`,
+                              pos.market.substring(0, 40)
+                            );
+                          }
+                        } catch (redeemErr) {
+                          // Log but don't crash on redeem errors
+                          dashboardV3.logError(
+                            `Redeem error: ${(
+                              redeemErr as Error
+                            ).message.substring(0, 50)}`,
+                            pos.market.substring(0, 40)
+                          );
+                        }
+                      }
+                    }
                   } catch {
                     // Silently ignore position fetch errors
                   }
@@ -513,13 +567,18 @@ async function handleTradeDetected(
         ? result.result?.executedSize
         : undefined;
 
+      // For REDEEM, target shares/price from Data API are often 0
+      // Use 1.0 as price (redemption value) for display
+      const targetSharesDisplay = isRedeem ? 0 : signal.sizeShares || 0;
+      const targetPriceDisplay = isRedeem ? 1.0 : signal.price;
+
       // Log target activity with our copy result
       dashboardV3.logTargetActivity({
         activityType: signal.activityType || "TRADE",
         side: signal.side,
         targetWallet: signal.targetWallet,
-        targetShares: signal.sizeShares || 0,
-        targetPrice: signal.price,
+        targetShares: targetSharesDisplay,
+        targetPrice: targetPriceDisplay,
         marketName,
         copied: result.result?.success === true && !result.skipped,
         copyError: result.skipped
@@ -528,6 +587,7 @@ async function handleTradeDetected(
         yourShares: isRedeem ? positionsRedeemed : result.order?.size,
         yourPrice: isRedeem ? usdcGained : result.order?.price,
         orderId,
+        targetTradeTime: signal.timestamp,
       });
 
       // Update stats if paper trading

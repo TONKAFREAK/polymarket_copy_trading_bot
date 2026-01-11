@@ -323,7 +323,7 @@ export class Executor {
 
   /**
    * Handle REDEEM activity - settle positions when market resolves
-   * When target redeems, we also try to redeem our matching position
+   * When target redeems, we find ALL our positions in the same market and redeem them
    */
   private async handleRedeem(
     signal: TradeSignal,
@@ -365,41 +365,132 @@ export class Executor {
       };
     }
 
-    // For live trading, attempt to redeem our position for the same token
-    if (signal.tokenId) {
+    // For live trading, find and redeem ALL our positions in the same market
+    if (signal.tokenId || signal.conditionId) {
       try {
-        // Import and call the redeem function
         const { redeemByTokenId } = await import("../commands/redeem");
-        const result = await redeemByTokenId(signal.tokenId);
+        const { getGammaApiClient } = await import("../polymarket/gammaApi");
+        const gammaApi = getGammaApiClient();
 
-        if (result.success) {
-          logger.info("Auto-redemption succeeded", {
-            market: result.marketName,
-            usdcGained: result.usdcGained,
-            txHash: result.txHash,
+        // Get the conditionId from the target's token
+        let targetConditionId = signal.conditionId;
+        let marketName = signal.marketSlug || "Unknown";
+
+        if (!targetConditionId && signal.tokenId) {
+          const marketInfo = await gammaApi.getMarketByTokenId(signal.tokenId);
+          if (marketInfo) {
+            targetConditionId = marketInfo.conditionId;
+            marketName = String(
+              marketInfo.question || marketInfo.title || marketName
+            );
+          }
+        }
+
+        if (!targetConditionId) {
+          logger.warn("REDEEM: Could not find conditionId for market", {
+            tokenId: signal.tokenId?.substring(0, 16) + "...",
+          });
+          return {
+            signal,
+            skipped: true,
+            skipReason: "REDEEM: Could not identify market conditionId",
+            dryRun: false,
+            timestamp,
+          };
+        }
+
+        logger.info("REDEEM: Looking for our positions in resolved market", {
+          market: marketName,
+          conditionId: targetConditionId.substring(0, 20) + "...",
+        });
+
+        // Get our positions and find ones matching this conditionId
+        const { positions } = await this.getPositions();
+        const matchingPositions = positions.filter(
+          (pos) => pos.conditionId === targetConditionId && pos.shares > 0
+        );
+
+        if (matchingPositions.length === 0) {
+          logger.info("REDEEM: No matching positions found in this market", {
+            market: marketName,
           });
           return {
             signal,
             result: {
               success: true,
-              orderId: result.txHash || `REDEEM_${Date.now()}`,
-              executedPrice: result.usdcGained,
+              orderId: `REDEEM_NO_POS_${Date.now()}`,
+            },
+            skipped: false,
+            dryRun: false,
+            timestamp,
+          };
+        }
+
+        logger.info("REDEEM: Found positions to redeem", {
+          market: marketName,
+          positionCount: matchingPositions.length,
+          tokens: matchingPositions.map((p) => ({
+            outcome: p.outcome,
+            shares: p.shares.toFixed(2),
+          })),
+        });
+
+        // Redeem each of our positions
+        let totalUsdcGained = 0;
+        let successCount = 0;
+        let lastTxHash: string | undefined;
+
+        for (const pos of matchingPositions) {
+          logger.info("REDEEM: Attempting to redeem position", {
+            tokenId: pos.tokenId.substring(0, 16) + "...",
+            outcome: pos.outcome,
+            shares: pos.shares.toFixed(2),
+          });
+
+          const result = await redeemByTokenId(pos.tokenId);
+
+          if (result.success) {
+            successCount++;
+            totalUsdcGained += result.usdcGained;
+            lastTxHash = result.txHash;
+            logger.info("REDEEM: Position redeemed successfully", {
+              outcome: pos.outcome,
+              usdcGained: result.usdcGained.toFixed(2),
+              txHash: result.txHash,
+            });
+          } else {
+            logger.warn("REDEEM: Failed to redeem position", {
+              outcome: pos.outcome,
+              error: result.error,
+            });
+          }
+        }
+
+        if (successCount > 0) {
+          logger.info("REDEEM: Auto-redemption complete", {
+            market: marketName,
+            successCount,
+            totalPositions: matchingPositions.length,
+            totalUsdcGained: totalUsdcGained.toFixed(2),
+          });
+          return {
+            signal,
+            result: {
+              success: true,
+              orderId: lastTxHash || `REDEEM_${Date.now()}`,
+              executedPrice: totalUsdcGained,
+              executedSize: successCount,
             },
             skipped: false,
             dryRun: false,
             timestamp,
           };
         } else {
-          // Redemption failed but not a critical error
-          logger.warn("Auto-redemption failed", {
-            market: result.marketName,
-            error: result.error,
-          });
           return {
             signal,
             result: {
               success: false,
-              errorMessage: result.error || "Redemption failed",
+              errorMessage: "All redemption attempts failed",
             },
             skipped: false,
             dryRun: false,
@@ -408,7 +499,7 @@ export class Executor {
         }
       } catch (error) {
         logger.error("Failed to auto-redeem", {
-          tokenId: signal.tokenId.substring(0, 16) + "...",
+          tokenId: signal.tokenId?.substring(0, 16) + "...",
           error: (error as Error).message,
         });
         return {
@@ -594,6 +685,9 @@ export class Executor {
       avgEntryPrice: number;
       currentValue: number;
       market: string;
+      conditionId?: string;
+      isResolved?: boolean;
+      isRedeemable?: boolean;
     }>;
     totalValue: number;
   }> {

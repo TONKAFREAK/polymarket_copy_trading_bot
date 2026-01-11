@@ -492,6 +492,13 @@ async function handleTradeDetected(
     if ("logTargetActivity" in dashboard) {
       const dashboardV3 = dashboard as DashboardV3;
 
+      // For REDEEM, show the USDC gained instead of shares/price
+      const isRedeem = signal.activityType === "REDEEM";
+      const usdcGained = isRedeem ? result.result?.executedPrice : undefined;
+      const positionsRedeemed = isRedeem
+        ? result.result?.executedSize
+        : undefined;
+
       // Log target activity with our copy result
       dashboardV3.logTargetActivity({
         activityType: signal.activityType || "TRADE",
@@ -504,8 +511,8 @@ async function handleTradeDetected(
         copyError: result.skipped
           ? result.skipReason
           : result.result?.errorMessage,
-        yourShares: result.order?.size,
-        yourPrice: result.order?.price,
+        yourShares: isRedeem ? positionsRedeemed : result.order?.size,
+        yourPrice: isRedeem ? usdcGained : result.order?.price,
         orderId,
       });
 

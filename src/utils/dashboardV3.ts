@@ -812,13 +812,22 @@ export class DashboardV3 {
     // Line 2: Our result
     let line2 = `             `;
     if (entry.copied) {
-      // Successfully copied
-      const yourShares = entry.yourShares?.toFixed(1) || "0.0";
-      const yourPrice = entry.yourPrice?.toFixed(2) || "0.00";
-      const yourTotal = entry.yourTotal?.toFixed(2) || "0.00";
-      line2 += `{green-fg}→ COPIED:{/} ${yourShares.padStart(
-        5
-      )}@$${yourPrice}={white-fg}$${yourTotal.padStart(5)}{/}`;
+      if (entry.activityType === "REDEEM") {
+        // For REDEEM: yourPrice = USDC gained, yourShares = positions redeemed
+        const usdcGained = entry.yourPrice?.toFixed(2) || "0.00";
+        const posCount = entry.yourShares?.toFixed(0) || "1";
+        line2 += `{green-fg}→ REDEEMED:{/} {white-fg}+$${usdcGained}{/} (${posCount} position${
+          Number(posCount) !== 1 ? "s" : ""
+        })`;
+      } else {
+        // For regular trades
+        const yourShares = entry.yourShares?.toFixed(1) || "0.0";
+        const yourPrice = entry.yourPrice?.toFixed(2) || "0.00";
+        const yourTotal = entry.yourTotal?.toFixed(2) || "0.00";
+        line2 += `{green-fg}→ COPIED:{/} ${yourShares.padStart(
+          5
+        )}@$${yourPrice}={white-fg}$${yourTotal.padStart(5)}{/}`;
+      }
     } else if (entry.copyError) {
       // Error
       const shortError =

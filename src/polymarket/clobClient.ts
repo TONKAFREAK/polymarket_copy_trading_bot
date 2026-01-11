@@ -485,6 +485,7 @@ export class ClobClientWrapper {
       market: string;
       match_time: string;
       outcome: string;
+      fee_rate_bps?: string;
     }>;
     count: number;
   }> {
@@ -507,6 +508,7 @@ export class ClobClientWrapper {
           market: t.market,
           match_time: t.match_time,
           outcome: t.outcome,
+          fee_rate_bps: (t as any).fee_rate_bps,
         })),
         count: trades?.length || 0,
       };
@@ -582,8 +584,10 @@ export class ClobClientWrapper {
       conditionId?: string;
       isResolved?: boolean;
       isRedeemable?: boolean;
+      feesPaid?: number;
     }>;
     totalValue: number;
+    totalFees: number;
   }> {
     if (!this.client) {
       throw new Error("Client not initialized");
@@ -606,6 +610,7 @@ export class ClobClientWrapper {
           shares: number;
           totalCost: number;
           market: string;
+          totalFees: number;
         }
       >();
 
@@ -623,16 +628,24 @@ export class ClobClientWrapper {
             shares: 0,
             totalCost: 0,
             market: trade.market,
+            totalFees: 0,
           };
           positionMap.set(tokenId, pos);
         }
 
+        const feeRateBps = parseFloat(trade.fee_rate_bps || "0") || 0;
+        const fee = Math.abs(size * price * (feeRateBps / 10000));
+
         if (isBuy) {
           pos.shares += size;
-          pos.totalCost += size * price;
+          // Buy cost includes fee
+          pos.totalCost += size * price + fee;
+          pos.totalFees += fee;
         } else {
           pos.shares -= size;
-          pos.totalCost -= size * price;
+          // Sell reduces cost basis by proceeds; fee reduces proceeds
+          pos.totalCost -= size * price - fee;
+          pos.totalFees += fee;
         }
       }
 
@@ -647,9 +660,11 @@ export class ClobClientWrapper {
         conditionId?: string;
         isResolved?: boolean;
         isRedeemable?: boolean;
+        feesPaid?: number;
       }> = [];
 
       let totalValue = 0;
+      let totalFees = 0;
 
       for (const pos of positionMap.values()) {
         if (Math.abs(pos.shares) >= 0.01) {
@@ -706,9 +721,11 @@ export class ClobClientWrapper {
               conditionId,
               isResolved,
               isRedeemable,
+              feesPaid: pos.totalFees,
             });
 
             totalValue += currentValue;
+            totalFees += pos.totalFees;
           }
         }
       }
@@ -719,12 +736,12 @@ export class ClobClientWrapper {
         } open positions, total value: $${totalValue.toFixed(2)}`
       );
 
-      return { positions, totalValue };
+      return { positions, totalValue, totalFees };
     } catch (error) {
       logger.error("Failed to get positions", {
         error: (error as Error).message,
       });
-      return { positions: [], totalValue: 0 };
+      return { positions: [], totalValue: 0, totalFees: 0 };
     }
   }
 

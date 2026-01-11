@@ -688,11 +688,13 @@ export class Executor {
       conditionId?: string;
       isResolved?: boolean;
       isRedeemable?: boolean;
+      feesPaid?: number;
     }>;
     totalValue: number;
+    totalFees: number;
   }> {
     if (!this.clobClient) {
-      return { positions: [], totalValue: 0 };
+      return { positions: [], totalValue: 0, totalFees: 0 };
     }
     try {
       return await this.clobClient.getPositions();
@@ -700,7 +702,7 @@ export class Executor {
       logger.error("Failed to get positions", {
         error: (error as Error).message,
       });
-      return { positions: [], totalValue: 0 };
+      return { positions: [], totalValue: 0, totalFees: 0 };
     }
   }
 

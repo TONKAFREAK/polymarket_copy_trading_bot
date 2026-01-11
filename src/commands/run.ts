@@ -342,12 +342,14 @@ export function createRunCommand(): Command {
                 // Fetch positions first so portfolio value mirrors holdings
                 let positionsValue = sessionTrades.totalValue;
                 let openPositionsCount = 0;
+                let totalFees = 0;
 
                 if (dashboardV3) {
                   try {
                     const positionsData = await executor.getPositions();
                     positionsValue = positionsData.totalValue;
                     openPositionsCount = positionsData.positions.length;
+                    totalFees = positionsData.totalFees;
 
                     // Always push the latest positions so status icons can update
                     const livePositions: LivePosition[] =
@@ -361,6 +363,7 @@ export function createRunCommand(): Command {
                         isResolved: p.isResolved,
                         isRedeemable: p.isRedeemable,
                         conditionId: p.conditionId,
+                        feesPaid: p.feesPaid,
                       }));
                     dashboardV3.setPositions(livePositions);
                   } catch {
@@ -374,6 +377,7 @@ export function createRunCommand(): Command {
                   totalTrades: sessionTrades.count,
                   positionsValue,
                   openPositions: openPositionsCount || undefined,
+                  totalFees,
                   winRate,
                 });
               } catch {

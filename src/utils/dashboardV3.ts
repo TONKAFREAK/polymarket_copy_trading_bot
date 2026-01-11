@@ -37,6 +37,7 @@ export interface LivePosition {
   isResolved?: boolean;
   isRedeemable?: boolean;
   conditionId?: string;
+  feesPaid?: number;
 }
 
 export interface TradeLogEntry {
@@ -225,7 +226,7 @@ export class DashboardV3 {
       process.emit("SIGINT", "SIGINT");
     });
 
-    // Scroll keys for log
+    // Scroll keys: arrow keys for activity log, PgUp/PgDn for holdings
     this.screen.key(["up", "k"], () => {
       this.logBox.scroll(-1);
       this.screen.render();
@@ -237,12 +238,14 @@ export class DashboardV3 {
     });
 
     this.screen.key(["pageup"], () => {
-      this.logBox.scroll(-10);
+      const targetLog = this.targetBox as unknown as blessed.Widgets.Log;
+      targetLog.scroll(-10);
       this.screen.render();
     });
 
     this.screen.key(["pagedown"], () => {
-      this.logBox.scroll(10);
+      const targetLog = this.targetBox as unknown as blessed.Widgets.Log;
+      targetLog.scroll(10);
       this.screen.render();
     });
   }
@@ -693,10 +696,11 @@ export class DashboardV3 {
         // Format shares and value
         const sharesStr = pos.shares.toFixed(1).padStart(6);
         const valueStr = `$${pos.currentValue.toFixed(2)}`.padStart(8);
+        const feeStr = `fee-$${(pos.feesPaid || 0).toFixed(2)}`;
 
         // Line 1: Status, Side, Shares, Value
         targetLog.log(
-          `${statusIcon} {${sideColor}-fg}${sideStr}{/} ${sharesStr} ${valueStr}`
+          `${statusIcon} {${sideColor}-fg}${sideStr}{/} ${sharesStr} ${valueStr} {gray-fg}${feeStr}{/}`
         );
 
         // Line 2: Market question (full name, wrapped if needed)

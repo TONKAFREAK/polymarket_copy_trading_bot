@@ -22,7 +22,8 @@ const originalConsole = {
 };
 
 // Callback for intercepted console output (for dashboard)
-let consoleInterceptCallback: ((type: string, message: string) => void) | null = null;
+let consoleInterceptCallback: ((type: string, message: string) => void) | null =
+  null;
 
 // Custom format for console output
 const consoleFormat = printf(
@@ -52,36 +53,38 @@ export function enableDashboardMode(): void {
   if (loggerInstance && consoleTransport) {
     loggerInstance.remove(consoleTransport);
   }
-  
+
   // Intercept console methods to prevent library output from breaking dashboard
-  const interceptConsole = (type: string) => (...args: unknown[]) => {
-    // Convert args to string
-    const message = args.map(arg => 
-      typeof arg === 'string' ? arg : JSON.stringify(arg)
-    ).join(' ');
-    
-    // If we have a callback, send it there (for dashboard to display)
-    if (consoleInterceptCallback) {
-      consoleInterceptCallback(type, message);
-    }
-    
-    // Also log to file if available
-    if (loggerInstance) {
-      if (type === 'error') {
-        loggerInstance.error(message);
-      } else if (type === 'warn') {
-        loggerInstance.warn(message);
-      } else {
-        loggerInstance.debug(message);
+  const interceptConsole =
+    (type: string) =>
+    (...args: unknown[]) => {
+      // Convert args to string
+      const message = args
+        .map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg)))
+        .join(" ");
+
+      // If we have a callback, send it there (for dashboard to display)
+      if (consoleInterceptCallback) {
+        consoleInterceptCallback(type, message);
       }
-    }
-  };
-  
-  console.log = interceptConsole('log');
-  console.error = interceptConsole('error');
-  console.warn = interceptConsole('warn');
-  console.info = interceptConsole('info');
-  console.debug = interceptConsole('debug');
+
+      // Also log to file if available
+      if (loggerInstance) {
+        if (type === "error") {
+          loggerInstance.error(message);
+        } else if (type === "warn") {
+          loggerInstance.warn(message);
+        } else {
+          loggerInstance.debug(message);
+        }
+      }
+    };
+
+  console.log = interceptConsole("log");
+  console.error = interceptConsole("error");
+  console.warn = interceptConsole("warn");
+  console.info = interceptConsole("info");
+  console.debug = interceptConsole("debug");
 }
 
 /**
@@ -92,21 +95,23 @@ export function disableDashboardMode(): void {
   if (loggerInstance && consoleTransport) {
     loggerInstance.add(consoleTransport);
   }
-  
+
   // Restore original console methods
   console.log = originalConsole.log;
   console.error = originalConsole.error;
   console.warn = originalConsole.warn;
   console.info = originalConsole.info;
   console.debug = originalConsole.debug;
-  
+
   consoleInterceptCallback = null;
 }
 
 /**
  * Set a callback to receive intercepted console output
  */
-export function setConsoleInterceptCallback(callback: (type: string, message: string) => void): void {
+export function setConsoleInterceptCallback(
+  callback: (type: string, message: string) => void
+): void {
   consoleInterceptCallback = callback;
 }
 

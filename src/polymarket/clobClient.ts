@@ -41,7 +41,10 @@ export class ClobClientWrapper {
   private config: ClobClientConfig;
   private initialized: boolean = false;
   // Cache market params for faster order placement
-  private marketParamsCache: Map<string, { tickSize: string; negRisk: boolean; timestamp: number }> = new Map();
+  private marketParamsCache: Map<
+    string,
+    { tickSize: string; negRisk: boolean; timestamp: number }
+  > = new Map();
   private readonly CACHE_TTL_MS = 60000; // 1 minute cache
 
   constructor(config: ClobClientConfig) {
@@ -86,12 +89,13 @@ export class ClobClientWrapper {
       this.config.clobUrl || chainConfig.clobUrl || env.clobApiUrl;
 
     // Check if we have Builder API credentials
-    const hasBuilderCreds = env.polyApiKey && env.polyApiSecret && env.polyPassphrase;
-    
+    const hasBuilderCreds =
+      env.polyApiKey && env.polyApiSecret && env.polyPassphrase;
+
     if (!hasBuilderCreds) {
       throw new Error(
         "Builder API credentials required. Set POLY_API_KEY, POLY_API_SECRET, and POLY_PASSPHRASE in .env. " +
-        "Get these from https://builders.polymarket.com/"
+          "Get these from https://builders.polymarket.com/"
       );
     }
 
@@ -101,7 +105,7 @@ export class ClobClientWrapper {
         key: env.polyApiKey!,
         secret: env.polyApiSecret!,
         passphrase: env.polyPassphrase!,
-      }
+      },
     });
 
     logger.info("Builder credentials configured", {
@@ -110,8 +114,12 @@ export class ClobClientWrapper {
 
     // First, derive user API credentials from the wallet
     // This creates/retrieves credentials for the wallet itself
-    const tempClient = new ClobClient(clobUrl, this.config.chainId, this.wallet);
-    
+    const tempClient = new ClobClient(
+      clobUrl,
+      this.config.chainId,
+      this.wallet
+    );
+
     let userCreds;
     try {
       userCreds = await tempClient.createOrDeriveApiKey();
@@ -122,7 +130,7 @@ export class ClobClientWrapper {
       });
       throw new Error(
         "Failed to derive API credentials. Make sure your wallet has been used on Polymarket. " +
-        "Visit https://polymarket.com and make at least one trade first."
+          "Visit https://polymarket.com and make at least one trade first."
       );
     }
 
@@ -132,13 +140,13 @@ export class ClobClientWrapper {
     // signatureType: 0 = EOA wallet, 1 = Magic/Email, 2 = Safe proxy
     const signatureType = env.polySignatureType;
     const funderAddress = env.polyFunderAddress;
-    
+
     logger.info("Setting up CLOB client", {
       signatureType,
       funderAddress: funderAddress || "(not set - using wallet address)",
       walletAddress: this.wallet.address,
     });
-    
+
     this.client = new ClobClient(
       clobUrl,
       this.config.chainId,
@@ -147,7 +155,7 @@ export class ClobClientWrapper {
       signatureType,
       funderAddress, // Polymarket profile address for Magic/Email login
       undefined, // options
-      false,     // useServerTime
+      false, // useServerTime
       builderConfig
     );
 
@@ -184,8 +192,8 @@ export class ClobClientWrapper {
 
       // Get market parameters (with caching for speed)
       let tickSize = "0.01"; // Default
-      let negRisk = false;   // Default
-      
+      let negRisk = false; // Default
+
       // Check cache first for faster order placement
       const cached = this.marketParamsCache.get(request.tokenId);
       if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
@@ -202,10 +210,10 @@ export class ClobClientWrapper {
           tickSize = fetchedTickSize;
           negRisk = fetchedNegRisk;
           // Cache for future orders
-          this.marketParamsCache.set(request.tokenId, { 
-            tickSize, 
-            negRisk, 
-            timestamp: Date.now() 
+          this.marketParamsCache.set(request.tokenId, {
+            tickSize,
+            negRisk,
+            timestamp: Date.now(),
           });
         } catch (e) {
           logger.debug("Using default market params", { tickSize, negRisk });
@@ -252,7 +260,8 @@ export class ClobClientWrapper {
         };
       } else {
         // Log the full response to understand why no order ID
-        const errorMsg = response?.errorMsg || response?.error || "No order ID returned";
+        const errorMsg =
+          response?.errorMsg || response?.error || "No order ID returned";
         logger.warn("Order submission issue", {
           response: JSON.stringify(response),
           errorMsg,
@@ -386,7 +395,7 @@ export class ClobClientWrapper {
       // Get USDC balance from Polymarket account (not on-chain!)
       // This is the collateral balance deposited into Polymarket for trading
       logger.info("Fetching Polymarket collateral balance...");
-      
+
       const collateralBalance = await this.client.getBalanceAllowance({
         asset_type: AssetType.COLLATERAL,
       });
@@ -412,7 +421,7 @@ export class ClobClientWrapper {
         stack: (error as Error).stack,
         walletAddress: this.wallet.address,
       });
-      
+
       // Return 0 but log the full error for debugging
       return { usdc: "0", matic: "0" };
     }
@@ -462,7 +471,7 @@ export class ClobClientWrapper {
       // Use the CLOB client's getTrades method
       const trades = await this.client.getTrades();
       logger.debug(`Fetched ${trades?.length || 0} trades from CLOB API`);
-      
+
       return {
         trades: (trades || []).map((t) => ({
           id: t.id,
@@ -562,15 +571,18 @@ export class ClobClientWrapper {
 
       // Fetch all trades
       const { trades } = await this.getTrades();
-      
+
       // Aggregate trades into positions by asset_id
-      const positionMap = new Map<string, {
-        tokenId: string;
-        outcome: string;
-        shares: number;
-        totalCost: number;
-        market: string;
-      }>();
+      const positionMap = new Map<
+        string,
+        {
+          tokenId: string;
+          outcome: string;
+          shares: number;
+          totalCost: number;
+          market: string;
+        }
+      >();
 
       for (const trade of trades) {
         const tokenId = trade.asset_id;
@@ -626,20 +638,29 @@ export class ClobClientWrapper {
             const avgPrice = pos.shares > 0 ? pos.totalCost / pos.shares : 0;
             // Current value = shares * avg entry price
             const currentValue = actualShares * avgPrice;
-            
+
             // Fetch market info for resolution status
             let marketName = pos.market || "Unknown";
             let conditionId: string | undefined;
             let isResolved = false;
             let isRedeemable = false;
-            
+
             try {
               const marketInfo = await gammaApi.getMarketByTokenId(pos.tokenId);
               if (marketInfo) {
-                marketName = String(marketInfo.question || marketInfo.title || pos.market || "Unknown");
-                conditionId = marketInfo.conditionId ? String(marketInfo.conditionId) : undefined;
-                isResolved = marketInfo.closed === true || String(marketInfo.closed) === "true";
-                
+                marketName = String(
+                  marketInfo.question ||
+                    marketInfo.title ||
+                    pos.market ||
+                    "Unknown"
+                );
+                conditionId = marketInfo.conditionId
+                  ? String(marketInfo.conditionId)
+                  : undefined;
+                isResolved =
+                  marketInfo.closed === true ||
+                  String(marketInfo.closed) === "true";
+
                 // Check if redeemable (resolved AND we might be a winner)
                 // For now, mark as redeemable if resolved - actual redemption will verify
                 if (isResolved && conditionId) {
@@ -649,7 +670,7 @@ export class ClobClientWrapper {
             } catch {
               // Ignore market fetch errors
             }
-            
+
             positions.push({
               tokenId: pos.tokenId,
               outcome: pos.outcome,
@@ -667,7 +688,11 @@ export class ClobClientWrapper {
         }
       }
 
-      logger.debug(`Found ${positions.length} open positions, total value: $${totalValue.toFixed(2)}`);
+      logger.debug(
+        `Found ${
+          positions.length
+        } open positions, total value: $${totalValue.toFixed(2)}`
+      );
 
       return { positions, totalValue };
     } catch (error) {
@@ -681,7 +706,9 @@ export class ClobClientWrapper {
   /**
    * Get conditional token balance for a specific token ID
    */
-  async getTokenBalance(tokenId: string): Promise<{ balance: string; allowance: string }> {
+  async getTokenBalance(
+    tokenId: string
+  ): Promise<{ balance: string; allowance: string }> {
     if (!this.client) {
       throw new Error("Client not initialized");
     }

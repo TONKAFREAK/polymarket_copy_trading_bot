@@ -22,7 +22,10 @@ export function createPaperCommand(): Command {
     .description("Show current paper trading positions")
     .action(async () => {
       const env = getEnvConfig();
-      const manager = new PaperTradingManager("./data", env.paperStartingBalance);
+      const manager = new PaperTradingManager(
+        "./data",
+        env.paperStartingBalance
+      );
       const state = manager.getState();
 
       console.log(chalk.bold("\n📊 Paper Trading Positions\n"));
@@ -33,14 +36,18 @@ export function createPaperCommand(): Command {
 
       console.log(chalk.gray("─".repeat(70)));
       console.log(
-        chalk.bold(`Balance: ${chalk.green("$" + state.currentBalance.toFixed(2))}`)
+        chalk.bold(
+          `Balance: ${chalk.green("$" + state.currentBalance.toFixed(2))}`
+        )
       );
       console.log(
         chalk.bold(
           `Starting: $${state.startingBalance.toFixed(2)} | P&L: ${
             state.stats.totalRealizedPnl >= 0
               ? chalk.green("+$" + state.stats.totalRealizedPnl.toFixed(2))
-              : chalk.red("-$" + Math.abs(state.stats.totalRealizedPnl).toFixed(2))
+              : chalk.red(
+                  "-$" + Math.abs(state.stats.totalRealizedPnl).toFixed(2)
+                )
           }`
         )
       );
@@ -49,7 +56,9 @@ export function createPaperCommand(): Command {
       if (openPositions.length === 0) {
         console.log(chalk.yellow("\nNo open positions."));
       } else {
-        console.log(chalk.bold(`\n📈 Open Positions (${openPositions.length}):\n`));
+        console.log(
+          chalk.bold(`\n📈 Open Positions (${openPositions.length}):\n`)
+        );
 
         for (const pos of openPositions) {
           const isExpired = isMarketExpired(pos.marketSlug);
@@ -61,10 +70,14 @@ export function createPaperCommand(): Command {
 
           console.log(`  ${statusTag} ${chalk.cyan(pos.marketSlug)}`);
           console.log(
-            `    ${pos.outcome} | ${pos.shares.toFixed(2)} shares @ $${pos.avgEntryPrice.toFixed(4)}`
+            `    ${pos.outcome} | ${pos.shares.toFixed(
+              2
+            )} shares @ $${pos.avgEntryPrice.toFixed(4)}`
           );
           console.log(
-            `    Cost: $${pos.totalCost.toFixed(2)} | Token: ${pos.tokenId.substring(0, 20)}...`
+            `    Cost: $${pos.totalCost.toFixed(
+              2
+            )} | Token: ${pos.tokenId.substring(0, 20)}...`
           );
           console.log("");
         }
@@ -83,12 +96,20 @@ export function createPaperCommand(): Command {
   // Force settle expired positions
   paper
     .command("settle")
-    .description("Force settle expired positions that couldn't be resolved via API")
+    .description(
+      "Force settle expired positions that couldn't be resolved via API"
+    )
     .option("-w, --win", "Assume all positions won (default is loss)")
-    .option("-m, --market <slug>", "Only settle positions in this specific market")
+    .option(
+      "-m, --market <slug>",
+      "Only settle positions in this specific market"
+    )
     .action(async (options) => {
       const env = getEnvConfig();
-      const manager = new PaperTradingManager("./data", env.paperStartingBalance);
+      const manager = new PaperTradingManager(
+        "./data",
+        env.paperStartingBalance
+      );
 
       const expiredPositions = manager.getExpiredPositions();
       const targetPositions = options.market
@@ -102,7 +123,9 @@ export function createPaperCommand(): Command {
 
       console.log(chalk.bold("\n⚠️  Force Settle Expired Positions\n"));
       console.log(chalk.gray("─".repeat(60)));
-      console.log(`Positions to settle: ${chalk.bold(targetPositions.length.toString())}`);
+      console.log(
+        `Positions to settle: ${chalk.bold(targetPositions.length.toString())}`
+      );
       console.log(
         `Assumed outcome: ${
           options.win ? chalk.green("WIN ($1.00)") : chalk.red("LOSS ($0.00)")
@@ -113,7 +136,9 @@ export function createPaperCommand(): Command {
       for (const pos of targetPositions) {
         console.log(`  ${chalk.cyan(pos.marketSlug)}`);
         console.log(
-          `    ${pos.outcome} | ${pos.shares.toFixed(2)} shares @ $${pos.avgEntryPrice.toFixed(4)}`
+          `    ${pos.outcome} | ${pos.shares.toFixed(
+            2
+          )} shares @ $${pos.avgEntryPrice.toFixed(4)}`
         );
         console.log(`    Cost: $${pos.totalCost.toFixed(2)}`);
       }
@@ -131,7 +156,9 @@ export function createPaperCommand(): Command {
         spinner.succeed("Positions settled");
 
         console.log(chalk.gray("─".repeat(60)));
-        console.log(`Settled: ${chalk.bold(result.settled.toString())} positions`);
+        console.log(
+          `Settled: ${chalk.bold(result.settled.toString())} positions`
+        );
         console.log(
           `Total P&L: ${
             result.totalPnl >= 0
@@ -153,7 +180,10 @@ export function createPaperCommand(): Command {
     .description("Show paper trading statistics")
     .action(async () => {
       const env = getEnvConfig();
-      const manager = new PaperTradingManager("./data", env.paperStartingBalance);
+      const manager = new PaperTradingManager(
+        "./data",
+        env.paperStartingBalance
+      );
       const stats = manager.getFormattedStats();
       console.log(stats);
     });
@@ -174,7 +204,10 @@ export function createPaperCommand(): Command {
       );
       console.log(`New starting balance: $${balance.toFixed(2)}\n`);
 
-      const manager = new PaperTradingManager("./data", env.paperStartingBalance);
+      const manager = new PaperTradingManager(
+        "./data",
+        env.paperStartingBalance
+      );
       manager.reset(balance);
 
       console.log(chalk.green("✅ Paper trading account reset.\n"));

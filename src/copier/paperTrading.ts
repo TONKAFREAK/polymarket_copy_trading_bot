@@ -264,27 +264,25 @@ export class PaperTradingManager {
 
   /**
    * Handle a REDEEM activity - settle our copied positions in the same market
-   * 
+   *
    * When target redeems a token in a market, it means that market has resolved.
    * We find ALL our positions in the SAME market (by marketSlug) and settle them.
-   * 
+   *
    * The target's redemption price tells us what the winning payout was:
    * - If they redeem at ~$1.0, they held the winning token
    * - If they redeem at ~$0.0, they held the losing token
-   * 
+   *
    * Since we copied their trade, if we have the SAME token, we have the same outcome.
    * If we have a DIFFERENT token in the same market, we have the OPPOSITE outcome.
    */
   async handleRedeem(signal: TradeSignal): Promise<OrderResult> {
     const redeemTokenId = signal.tokenId;
     const marketSlug = signal.marketSlug;
-    
+
     // Find all positions in the same market that are not yet settled
     const positionsToSettle = Object.entries(this.state.positions).filter(
-      ([_tokenId, pos]) => 
-        pos.marketSlug === marketSlug && 
-        !pos.settled && 
-        pos.shares > 0
+      ([_tokenId, pos]) =>
+        pos.marketSlug === marketSlug && !pos.settled && pos.shares > 0
     );
 
     if (positionsToSettle.length === 0) {
@@ -322,7 +320,9 @@ export class PaperTradingManager {
       // If our tokenId matches the redeem tokenId, we have the same outcome as target
       // If our tokenId is different, we have the opposite token (in a binary market)
       const ourTokenMatchesRedeem = tokenId === redeemTokenId;
-      const ourTokenWon = ourTokenMatchesRedeem ? targetTokenWon : !targetTokenWon;
+      const ourTokenWon = ourTokenMatchesRedeem
+        ? targetTokenWon
+        : !targetTokenWon;
       const settlementPrice = ourTokenWon ? 1.0 : 0.0;
 
       // Calculate P&L
@@ -378,7 +378,10 @@ export class PaperTradingManager {
 
       if (pnl > 0) {
         this.state.stats.winningTrades++;
-        this.state.stats.largestWin = Math.max(this.state.stats.largestWin, pnl);
+        this.state.stats.largestWin = Math.max(
+          this.state.stats.largestWin,
+          pnl
+        );
       } else if (pnl < 0) {
         this.state.stats.losingTrades++;
         this.state.stats.largestLoss = Math.min(
@@ -411,7 +414,7 @@ export class PaperTradingManager {
   /**
    * Manually settle expired positions that couldn't be resolved via API
    * This is used when markets have expired but we never received a REDEEM signal
-   * 
+   *
    * @param assumeWin - If true, assume positions won. If false, assume they lost.
    * @param marketSlug - Optional: only settle positions in this specific market
    * @returns Summary of settlements
@@ -494,7 +497,10 @@ export class PaperTradingManager {
 
       if (pnl > 0) {
         this.state.stats.winningTrades++;
-        this.state.stats.largestWin = Math.max(this.state.stats.largestWin, pnl);
+        this.state.stats.largestWin = Math.max(
+          this.state.stats.largestWin,
+          pnl
+        );
       } else if (pnl < 0) {
         this.state.stats.losingTrades++;
         this.state.stats.largestLoss = Math.min(
@@ -715,7 +721,7 @@ export class PaperTradingManager {
           // Check if market is expired by timestamp - if forceExpired is true, settle all expired
           const isExpiredByTime = this.isMarketExpired(position.marketSlug);
           const shouldForceSettle = forceExpired && isExpiredByTime;
-          
+
           if (shouldForceSettle) {
             logger.info("Force-settling expired market position as loss", {
               market: position.marketSlug,
@@ -777,7 +783,7 @@ export class PaperTradingManager {
         // Primary method: Match by winning token ID (most reliable)
         // Fallback: Use outcome prices array (less reliable due to outcome name mismatches)
         let settlementPrice = 0;
-        
+
         if (resolution.winningTokenId) {
           // Direct token ID match - most reliable
           if (tokenId === resolution.winningTokenId) {
@@ -818,8 +824,8 @@ export class PaperTradingManager {
         logger.info("Settling position with API resolution", {
           market: position.marketSlug,
           ourTokenId: tokenId.substring(0, 20) + "...",
-          winningTokenId: resolution.winningTokenId 
-            ? resolution.winningTokenId.substring(0, 20) + "..." 
+          winningTokenId: resolution.winningTokenId
+            ? resolution.winningTokenId.substring(0, 20) + "..."
             : "unknown",
           ourOutcome: position.outcome,
           apiWinningOutcome: resolution.winningOutcome,

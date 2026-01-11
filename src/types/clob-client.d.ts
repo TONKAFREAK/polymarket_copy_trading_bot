@@ -134,12 +134,12 @@ declare module "@polymarket/clob-client" {
      * Create or derive API credentials for the wallet
      */
     createOrDeriveApiKey(): Promise<ApiKeyCreds>;
-    
+
     /**
      * Derive existing API key
      */
     deriveApiKey(): Promise<ApiKeyCreds>;
-    
+
     /**
      * Create new API key
      */
@@ -148,7 +148,10 @@ declare module "@polymarket/clob-client" {
     /**
      * Create an order object (signs it)
      */
-    createOrder(params: OrderParams, options?: { tickSize?: string; negRisk?: boolean }): Promise<Order>;
+    createOrder(
+      params: OrderParams,
+      options?: { tickSize?: string; negRisk?: boolean }
+    ): Promise<Order>;
 
     /**
      * Create and post an order in one atomic call (recommended)
@@ -164,7 +167,12 @@ declare module "@polymarket/clob-client" {
     /**
      * Post a signed order to the CLOB
      */
-    postOrder(order: Order, orderType?: string, deferExec?: boolean, postOnly?: boolean): Promise<PostOrderResponse>;
+    postOrder(
+      order: Order,
+      orderType?: string,
+      deferExec?: boolean,
+      postOnly?: boolean
+    ): Promise<PostOrderResponse>;
 
     /**
      * Get tick size for a token
@@ -189,12 +197,19 @@ declare module "@polymarket/clob-client" {
     /**
      * Get trade history for the authenticated user
      */
-    getTrades(params?: TradeParams, only_first_page?: boolean, next_cursor?: string): Promise<Trade[]>;
+    getTrades(
+      params?: TradeParams,
+      only_first_page?: boolean,
+      next_cursor?: string
+    ): Promise<Trade[]>;
 
     /**
      * Get paginated trade history
      */
-    getTradesPaginated(params?: TradeParams, next_cursor?: string): Promise<TradesPaginatedResponse>;
+    getTradesPaginated(
+      params?: TradeParams,
+      next_cursor?: string
+    ): Promise<TradesPaginatedResponse>;
 
     /**
      * Cancel a specific order

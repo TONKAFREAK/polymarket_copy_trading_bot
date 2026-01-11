@@ -279,10 +279,10 @@ export class DashboardV3 {
    */
   setPositions(positions: LivePosition[]): void {
     // Check if positions actually changed (avoid unnecessary re-renders)
-    const positionsChanged = 
+    const positionsChanged =
       positions.length !== this.livePositions.length ||
       JSON.stringify(positions) !== JSON.stringify(this.livePositions);
-    
+
     if (positionsChanged) {
       this.livePositions = positions;
       this.stats.openPositions = positions.length;
@@ -593,7 +593,7 @@ export class DashboardV3 {
     }ms`;
 
     const content = `{center}${title}{/center}\n{center}${status}{/center}`;
-    
+
     // Only update if content changed (prevents flickering)
     if (content !== this.lastHeaderContent) {
       this.lastHeaderContent = content;
@@ -602,32 +602,32 @@ export class DashboardV3 {
   }
 
   private renderStats(): void {
-    const portfolioValue = this.stats.balance + this.stats.positionsValue;
-    const returnPct =
-      this.stats.startingBalance > 0
-        ? ((portfolioValue - this.stats.startingBalance) /
-            this.stats.startingBalance) *
-          100
-        : 0;
-    const totalPnl = this.stats.realizedPnl + this.stats.unrealizedPnl;
+    //const portfolioValue = this.stats.balance + this.stats.positionsValue;
+    // const returnPct =
+    //   this.stats.startingBalance > 0
+    //     ? ((portfolioValue - this.stats.startingBalance) /
+    //         this.stats.startingBalance) *
+    //       100
+    //     : 0;
+    // const totalPnl = this.stats.realizedPnl + this.stats.unrealizedPnl;
 
     const fmtMoney = (v: number) => {
       const str = `$${Math.abs(v).toFixed(2)}`;
       return str.padStart(10);
     };
-    const fmtSignedMoney = (v: number) => {
-      const sign = v >= 0 ? "+" : "-";
-      return `${sign}$${Math.abs(v).toFixed(2)}`.padStart(11);
-    };
-    const colorMoney = (v: number) => {
-      const str = fmtSignedMoney(v);
-      return v >= 0 ? `{green-fg}${str}{/}` : `{red-fg}${str}{/}`;
-    };
-    const colorPct = (v: number) => {
-      const sign = v >= 0 ? "+" : "-";
-      const str = `${sign}${Math.abs(v).toFixed(1)}%`;
-      return v >= 0 ? `{green-fg}${str}{/}` : `{red-fg}${str}{/}`;
-    };
+    // const fmtSignedMoney = (v: number) => {
+    //   const sign = v >= 0 ? "+" : "-";
+    //   return `${sign}$${Math.abs(v).toFixed(2)}`.padStart(11);
+    // };
+    // const colorMoney = (v: number) => {
+    //   const str = fmtSignedMoney(v);
+    //   return v >= 0 ? `{green-fg}${str}{/}` : `{red-fg}${str}{/}`;
+    // };
+    // const colorPct = (v: number) => {
+    //   const sign = v >= 0 ? "+" : "-";
+    //   const str = `${sign}${Math.abs(v).toFixed(1)}%`;
+    //   return v >= 0 ? `{green-fg}${str}{/}` : `{red-fg}${str}{/}`;
+    // };
 
     // Fixed-width layout using simple ASCII labels (no emojis for alignment)
     const lines = [
@@ -635,17 +635,17 @@ export class DashboardV3 {
       `{cyan-fg}Positions:{/}      ${fmtMoney(
         this.stats.positionsValue
       )} {gray-fg}(${this.stats.openPositions}){/}`,
-      `{cyan-fg}Portfolio:{/}      ${fmtMoney(portfolioValue)} ${colorPct(
-        returnPct
-      )}`,
-      `{gray-fg}─────────────────────────{/}`,
-      `{cyan-fg}Realized PnL:{/}   ${colorMoney(this.stats.realizedPnl)}`,
-      `{cyan-fg}Unrealized:{/}     ${colorMoney(this.stats.unrealizedPnl)}`,
-      `{cyan-fg}Total PnL:{/}      ${colorMoney(totalPnl)}`,
+      // `{cyan-fg}Portfolio:{/}      ${fmtMoney(portfolioValue)} ${colorPct(
+      //   returnPct
+      // )}`,
+      // `{gray-fg}─────────────────────────{/}`,
+      // `{cyan-fg}Realized PnL:{/}   ${colorMoney(this.stats.realizedPnl)}`,
+      // `{cyan-fg}Unrealized:{/}     ${colorMoney(this.stats.unrealizedPnl)}`,
+      // `{cyan-fg}Total PnL:{/}      ${colorMoney(totalPnl)}`,
     ];
 
     const content = lines.join("\n");
-    
+
     // Only update if content changed (prevents flickering)
     if (content !== this.lastStatsContent) {
       this.lastStatsContent = content;
@@ -656,15 +656,20 @@ export class DashboardV3 {
   private renderTargets(): void {
     // Cast to log for proper scrollable content
     const targetLog = this.targetBox as unknown as blessed.Widgets.Log;
-    
+
     // Clear and rebuild content
     targetLog.setContent("");
-    
+
     // In live or paper mode, show ALL positions
-    if ((this.stats.mode === "live" || this.stats.mode === "paper") && this.livePositions.length > 0) {
+    if (
+      (this.stats.mode === "live" || this.stats.mode === "paper") &&
+      this.livePositions.length > 0
+    ) {
       const labelPrefix = this.stats.mode === "paper" ? "Paper " : "";
-      this.targetBox.setLabel(` 📊 ${labelPrefix}Holdings (${this.livePositions.length}) `);
-      
+      this.targetBox.setLabel(
+        ` 📊 ${labelPrefix}Holdings (${this.livePositions.length}) `
+      );
+
       // Show ALL positions with full details
       for (const pos of this.livePositions) {
         // Status indicator
@@ -676,8 +681,9 @@ export class DashboardV3 {
         }
 
         // Side color (YES=green, NO=red)
-        const isYes = pos.outcome.toUpperCase().startsWith("Y") || 
-                      pos.outcome.toUpperCase().startsWith("U");
+        const isYes =
+          pos.outcome.toUpperCase().startsWith("Y") ||
+          pos.outcome.toUpperCase().startsWith("U");
         const sideColor = isYes ? "green" : "red";
         const sideStr = isYes ? "YES" : "NO ";
 
@@ -686,37 +692,51 @@ export class DashboardV3 {
         const valueStr = `$${pos.currentValue.toFixed(2)}`.padStart(8);
 
         // Line 1: Status, Side, Shares, Value
-        targetLog.log(`${statusIcon} {${sideColor}-fg}${sideStr}{/} ${sharesStr} ${valueStr}`);
-        
+        targetLog.log(
+          `${statusIcon} {${sideColor}-fg}${sideStr}{/} ${sharesStr} ${valueStr}`
+        );
+
         // Line 2: Market question (full name, wrapped if needed)
         const marketName = pos.market || "Unknown Market";
-        targetLog.log(`  {gray-fg}${marketName}{/}`);
+        targetLog.log(`  ${marketName}`);
       }
-      
+
       // Legend at bottom
-      targetLog.log(`{gray-fg}─────────────────────────────────{/}`);
-      targetLog.log(`{cyan-fg}●{/}Open {green-fg}✓{/}Redeemable {yellow-fg}○{/}Lost`);
-      
+      // targetLog.log(`{gray-fg}─────────────────────────────────{/}`);
+      // targetLog.log(
+      //   `{cyan-fg}●{/}Open {green-fg}✓{/}Redeemable {yellow-fg}○{/}Lost`
+      // );
     } else {
       // Show targets when no positions
       this.targetBox.setLabel(" 🎯 Targets ");
-      
+
       if (this.targetAddresses.length === 0) {
         targetLog.log("{gray-fg}No targets configured{/}");
       } else {
         for (let i = 0; i < this.targetAddresses.length; i++) {
           const addr = this.targetAddresses[i];
-          const shortAddr = `${addr.substring(0, 8)}...${addr.slice(-6)}`;
-          targetLog.log(`{yellow-fg}${(i + 1).toString().padStart(2)}.{/} {white-fg}${shortAddr}{/}`);
+          //const shortAddr = `${addr.substring(0, 8)}...${addr.slice(-6)}`;
+          targetLog.log(
+            `{yellow-fg}${(i + 1)
+              .toString()
+              .padStart(2)}.{/} {white-fg}${addr}{/}`
+          );
         }
       }
     }
 
-    // Add trading stats at the bottom
-    targetLog.log(`{gray-fg}─────────────────────────────────{/}`);
-    targetLog.log(`{cyan-fg}Trades:{/} ${String(this.stats.totalTrades).padStart(4)}  {cyan-fg}Win:{/} ${this.stats.winRate.toFixed(1).padStart(5)}%`);
+    // // Add trading stats at the bottom
+    // targetLog.log(`{gray-fg}─────────────────────────────────{/}`);
+    // targetLog.log(
+    //   `{cyan-fg}Trades:{/} ${String(this.stats.totalTrades).padStart(
+    //     4
+    //   )}  {cyan-fg}Win:{/} ${this.stats.winRate.toFixed(1).padStart(5)}%`
+    // );
 
-    if (this.stats.openOrdersCount !== undefined && this.stats.openOrdersCount > 0) {
+    if (
+      this.stats.openOrdersCount !== undefined &&
+      this.stats.openOrdersCount > 0
+    ) {
       targetLog.log(`{cyan-fg}Open Orders:{/} ${this.stats.openOrdersCount}`);
     }
   }
@@ -728,11 +748,12 @@ export class DashboardV3 {
         ? `{red-fg}-$${this.stats.totalFees.toFixed(2)}{/}`
         : "{gray-fg}$0.00{/}";
 
-    const content = ` {gray-fg}Updated:{/} ${lastUpdateStr}  |  ` +
-        `{gray-fg}Fees:{/} ${feesStr}  |  ` +
-        `{cyan-fg}q{/} or {cyan-fg}Ctrl+C{/} to exit  |  ` +
-        `Scroll: {cyan-fg}Up/Down{/} or {cyan-fg}PgUp/PgDn{/}`;
-    
+    const content =
+      ` {gray-fg}Updated:{/} ${lastUpdateStr}  |  ` +
+      `{gray-fg}Fees:{/} ${feesStr}  |  ` +
+      `{cyan-fg}q{/} or {cyan-fg}Ctrl+C{/} to exit  |  ` +
+      `Scroll: {cyan-fg}Up/Down{/} or {cyan-fg}PgUp/PgDn{/}`;
+
     // Only update if content changed (prevents flickering)
     if (content !== this.lastStatusBarContent) {
       this.lastStatusBarContent = content;

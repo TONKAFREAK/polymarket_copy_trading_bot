@@ -211,11 +211,11 @@ export class GammaApiClient {
   /**
    * Get market resolution info - determine if market is resolved and which outcome won
    * Returns: { resolved: boolean, winningOutcome: "YES" | "NO" | null, winningTokenId: string | null }
-   * 
+   *
    * IMPORTANT: We only consider a market "resolved" if:
    * 1. market.closed === true
    * 2. AND one of the outcomePrices is >= 0.99 (indicating a definitive winner)
-   * 
+   *
    * This prevents premature settlement of markets that are closed but not yet resolved.
    */
   async getMarketResolution(slug: string): Promise<{
@@ -295,9 +295,13 @@ export class GammaApiClient {
             // Ignore parse errors
           }
         }
-        
+
         // Fallback to market.tokens
-        if (!winningTokenId && market.tokens && market.tokens.length > winningIndex) {
+        if (
+          !winningTokenId &&
+          market.tokens &&
+          market.tokens.length > winningIndex
+        ) {
           winningTokenId = market.tokens[winningIndex].token_id;
         }
       }
@@ -305,7 +309,7 @@ export class GammaApiClient {
       // CRITICAL: Only return resolved=true if we have a definitive winner
       // This prevents settling positions before the market outcome is known
       const hasDefinitiveWinner = winningIndex >= 0 && winningOutcome !== null;
-      
+
       if (!hasDefinitiveWinner) {
         logger.debug("Market closed but no definitive winner yet", {
           slug,
@@ -430,9 +434,13 @@ export class GammaApiClient {
             // Ignore parse errors
           }
         }
-        
+
         // Fallback to market.tokens
-        if (!winningTokenId && market.tokens && market.tokens.length > winningIndex) {
+        if (
+          !winningTokenId &&
+          market.tokens &&
+          market.tokens.length > winningIndex
+        ) {
           winningTokenId = market.tokens[winningIndex].token_id;
         }
       }

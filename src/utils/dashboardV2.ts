@@ -39,7 +39,7 @@ export class DashboardV2 {
   private statsBox: blessed.Widgets.BoxElement;
   private logBox: blessed.Widgets.Log;
   private footerBox: blessed.Widgets.BoxElement;
-  
+
   private stats: DashboardStats;
   private logs: LogEntry[] = [];
   private startTime: number;
@@ -200,7 +200,7 @@ export class DashboardV2 {
     if (this.logs.length > MAX_LOG_ENTRIES) {
       this.logs.pop();
     }
-    
+
     if (this.isRunning) {
       this.addLogLine(entry);
     }
@@ -317,7 +317,7 @@ export class DashboardV2 {
   private renderHeader(): void {
     let modeStr: string;
     let modeIcon: string;
-    
+
     if (this.stats.mode === "dry-run") {
       modeStr = "{yellow-bg}{black-fg} DRY RUN {/}";
       modeIcon = "🔬";
@@ -330,11 +330,14 @@ export class DashboardV2 {
     }
 
     const uptimeStr = this.formatUptime(this.stats.uptime);
-    
-    const title = "{bold}{cyan-fg}═══════════════════════  POLYMARKET COPY TRADER  ═══════════════════════{/}";
+
+    const title =
+      "{bold}{cyan-fg}═══════════════════════  POLYMARKET COPY TRADER  ═══════════════════════{/}";
     const statusLine = `${modeIcon} ${modeStr}  ⏱️  ${uptimeStr}  🎯 ${this.stats.targetsCount} targets  ⚡ ${this.stats.pollingInterval}ms`;
-    
-    this.headerBox.setContent(`{center}${title}{/center}\n{center}${statusLine}{/center}`);
+
+    this.headerBox.setContent(
+      `{center}${title}{/center}\n{center}${statusLine}{/center}`
+    );
   }
 
   /**
@@ -344,7 +347,9 @@ export class DashboardV2 {
     const portfolioValue = this.stats.balance + this.stats.positionsValue;
     const returnPct =
       this.stats.startingBalance > 0
-        ? ((portfolioValue - this.stats.startingBalance) / this.stats.startingBalance) * 100
+        ? ((portfolioValue - this.stats.startingBalance) /
+            this.stats.startingBalance) *
+          100
         : 0;
     const totalPnl = this.stats.realizedPnl + this.stats.unrealizedPnl;
 
@@ -381,26 +386,43 @@ export class DashboardV2 {
     };
 
     // Row 1: Portfolio Summary
-    const row1Col1 = `{cyan-fg}💰 Balance:{/}     ${formatMoney(this.stats.balance)}`;
-    const row1Col2 = `{cyan-fg}📊 Positions:{/}   ${formatMoney(this.stats.positionsValue)} {gray-fg}(${this.stats.openPositions}){/}`;
-    const row1Col3 = `{cyan-fg}📈 Portfolio:{/}   ${formatMoney(portfolioValue)} ${formatPct(returnPct)}`;
-    
+    const row1Col1 = `{cyan-fg}💰 Balance:{/}     ${formatMoney(
+      this.stats.balance
+    )}`;
+    const row1Col2 = `{cyan-fg}📊 Positions:{/}   ${formatMoney(
+      this.stats.positionsValue
+    )} {gray-fg}(${this.stats.openPositions}){/}`;
+    const row1Col3 = `{cyan-fg}📈 Portfolio:{/}   ${formatMoney(
+      portfolioValue
+    )} ${formatPct(returnPct)}`;
+
     // Row 2: PnL
-    const row2Col1 = `{cyan-fg}✅ Realized:{/}    ${colorMoney(this.stats.realizedPnl)}`;
-    const row2Col2 = `{cyan-fg}⏳ Unrealized:{/}  ${colorMoney(this.stats.unrealizedPnl)}`;
+    const row2Col1 = `{cyan-fg}✅ Realized:{/}    ${colorMoney(
+      this.stats.realizedPnl
+    )}`;
+    const row2Col2 = `{cyan-fg}⏳ Unrealized:{/}  ${colorMoney(
+      this.stats.unrealizedPnl
+    )}`;
     const row2Col3 = `{cyan-fg}📊 Total PnL:{/}   ${colorMoney(totalPnl)}`;
 
     // Row 3: Trading Stats
     const row3Col1 = `{cyan-fg}🔄 Trades:{/}      ${this.stats.totalTrades}`;
-    const row3Col2 = `{cyan-fg}🎯 Win Rate:{/}    ${winRateColor(this.stats.winRate)}`;
-    const row3Col3 = `{cyan-fg}💸 Fees:{/}        {red-fg}-$${this.stats.totalFees.toFixed(2)}{/}`;
+    const row3Col2 = `{cyan-fg}🎯 Win Rate:{/}    ${winRateColor(
+      this.stats.winRate
+    )}`;
+    const row3Col3 = `{cyan-fg}💸 Fees:{/}        {red-fg}-$${this.stats.totalFees.toFixed(
+      2
+    )}{/}`;
 
     // Row 4: Open orders (for live mode)
-    const row4Col1 = this.stats.openOrdersCount !== undefined 
-      ? `{cyan-fg}📋 Open Orders:{/} ${this.stats.openOrdersCount}`
-      : "";
+    const row4Col1 =
+      this.stats.openOrdersCount !== undefined
+        ? `{cyan-fg}📋 Open Orders:{/} ${this.stats.openOrdersCount}`
+        : "";
     const row4Col2 = "";
-    const row4Col3 = `{gray-fg}Last update: ${this.formatTime(this.stats.lastUpdate)}{/}`;
+    const row4Col3 = `{gray-fg}Last update: ${this.formatTime(
+      this.stats.lastUpdate
+    )}{/}`;
 
     const content = [
       pad(row1Col1, col1W) + pad(row1Col2, col2W) + row1Col3,
@@ -422,7 +444,7 @@ export class DashboardV2 {
       minute: "2-digit",
       second: "2-digit",
     });
-    
+
     let icon: string;
     let msgColor: string;
 

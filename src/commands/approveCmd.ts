@@ -1,6 +1,6 @@
 /**
  * Approve Command
- * 
+ *
  * Sets up on-chain allowances for Polymarket trading
  */
 
@@ -11,7 +11,9 @@ export function createApproveCommand(): Command {
   const command = new Command("approve");
 
   command
-    .description("Approve on-chain allowances for Polymarket trading (one-time setup)")
+    .description(
+      "Approve on-chain allowances for Polymarket trading (one-time setup)"
+    )
     .action(async () => {
       try {
         await approveAllowances();

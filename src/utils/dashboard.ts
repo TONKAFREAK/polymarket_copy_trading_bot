@@ -369,24 +369,51 @@ export class Dashboard {
     };
 
     // Row 1: Portfolio Summary
-    const row1Col1 = `${chalk.cyan("💰 Balance:")}    ${chalk.white(formatMoneyVal(this.stats.balance))}`;
-    const row1Col2 = `${chalk.cyan("📊 Positions:")}  ${chalk.white(formatMoneyVal(this.stats.positionsValue))} ${chalk.gray(`(${this.stats.openPositions})`)}`;
-    const row1Col3 = `${chalk.cyan("📈 Portfolio:")}  ${chalk.white(formatMoneyVal(portfolioValue))} ${formatPct(returnPct)}`;
-    lines.push(this.formatRowFixed(row1Col1, row1Col2, row1Col3, colWidth, innerWidth));
+    const row1Col1 = `${chalk.cyan("💰 Balance:")}    ${chalk.white(
+      formatMoneyVal(this.stats.balance)
+    )}`;
+    const row1Col2 = `${chalk.cyan("📊 Positions:")}  ${chalk.white(
+      formatMoneyVal(this.stats.positionsValue)
+    )} ${chalk.gray(`(${this.stats.openPositions})`)}`;
+    const row1Col3 = `${chalk.cyan("📈 Portfolio:")}  ${chalk.white(
+      formatMoneyVal(portfolioValue)
+    )} ${formatPct(returnPct)}`;
+    lines.push(
+      this.formatRowFixed(row1Col1, row1Col2, row1Col3, colWidth, innerWidth)
+    );
 
     // Row 2: PnL
-    const row2Col1 = `${chalk.cyan("✅ Realized:")}   ${colorMoney(this.stats.realizedPnl, formatSignedMoney(this.stats.realizedPnl))}`;
-    const row2Col2 = `${chalk.cyan("⏳ Unrealized:")} ${colorMoney(this.stats.unrealizedPnl, formatSignedMoney(this.stats.unrealizedPnl))}`;
-    const row2Col3 = `${chalk.cyan("📊 Total PnL:")}  ${colorMoney(totalPnl, formatSignedMoney(totalPnl))}`;
-    lines.push(this.formatRowFixed(row2Col1, row2Col2, row2Col3, colWidth, innerWidth));
+    const row2Col1 = `${chalk.cyan("✅ Realized:")}   ${colorMoney(
+      this.stats.realizedPnl,
+      formatSignedMoney(this.stats.realizedPnl)
+    )}`;
+    const row2Col2 = `${chalk.cyan("⏳ Unrealized:")} ${colorMoney(
+      this.stats.unrealizedPnl,
+      formatSignedMoney(this.stats.unrealizedPnl)
+    )}`;
+    const row2Col3 = `${chalk.cyan("📊 Total PnL:")}  ${colorMoney(
+      totalPnl,
+      formatSignedMoney(totalPnl)
+    )}`;
+    lines.push(
+      this.formatRowFixed(row2Col1, row2Col2, row2Col3, colWidth, innerWidth)
+    );
 
     // Row 3: Trading Stats & Fees
-    const row3Col1 = `${chalk.cyan("🔄 Trades:")}     ${chalk.white(this.stats.totalTrades.toString().padStart(10))}`;
+    const row3Col1 = `${chalk.cyan("🔄 Trades:")}     ${chalk.white(
+      this.stats.totalTrades.toString().padStart(10)
+    )}`;
     const winRateStr = `${this.stats.winRate.toFixed(1)}%`.padStart(10);
     const winRateColor = this.stats.winRate >= 50 ? chalk.green : chalk.yellow;
-    const row3Col2 = `${chalk.cyan("🎯 Win Rate:")}   ${winRateColor(winRateStr)}`;
-    const row3Col3 = `${chalk.cyan("💸 Fees:")}       ${chalk.red("-$" + this.stats.totalFees.toFixed(2))}`;
-    lines.push(this.formatRowFixed(row3Col1, row3Col2, row3Col3, colWidth, innerWidth));
+    const row3Col2 = `${chalk.cyan("🎯 Win Rate:")}   ${winRateColor(
+      winRateStr
+    )}`;
+    const row3Col3 = `${chalk.cyan("💸 Fees:")}       ${chalk.red(
+      "-$" + this.stats.totalFees.toFixed(2)
+    )}`;
+    lines.push(
+      this.formatRowFixed(row3Col1, row3Col2, row3Col3, colWidth, innerWidth)
+    );
 
     return lines;
   }

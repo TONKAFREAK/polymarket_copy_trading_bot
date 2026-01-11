@@ -371,7 +371,7 @@ export class Executor {
         // Import and call the redeem function
         const { redeemByTokenId } = await import("../commands/redeem");
         const result = await redeemByTokenId(signal.tokenId);
-        
+
         if (result.success) {
           logger.info("Auto-redemption succeeded", {
             market: result.marketName,
@@ -509,7 +509,9 @@ export class Executor {
       const balances = await this.clobClient.getBalances();
       return parseFloat(balances.usdc) || 0;
     } catch (error) {
-      logger.error("Failed to get live balance", { error: (error as Error).message });
+      logger.error("Failed to get live balance", {
+        error: (error as Error).message,
+      });
       return 0;
     }
   }
@@ -534,7 +536,9 @@ export class Executor {
     try {
       return await this.clobClient.getLiveStats();
     } catch (error) {
-      logger.error("Failed to get live stats", { error: (error as Error).message });
+      logger.error("Failed to get live stats", {
+        error: (error as Error).message,
+      });
       return {
         balance: 0,
         openOrdersCount: 0,
@@ -554,7 +558,9 @@ export class Executor {
     try {
       return await this.clobClient.getOpenOrders();
     } catch (error) {
-      logger.error("Failed to get open orders", { error: (error as Error).message });
+      logger.error("Failed to get open orders", {
+        error: (error as Error).message,
+      });
       return [];
     }
   }
@@ -597,7 +603,9 @@ export class Executor {
     try {
       return await this.clobClient.getPositions();
     } catch (error) {
-      logger.error("Failed to get positions", { error: (error as Error).message });
+      logger.error("Failed to get positions", {
+        error: (error as Error).message,
+      });
       return { positions: [], totalValue: 0 };
     }
   }

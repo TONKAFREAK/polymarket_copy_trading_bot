@@ -670,7 +670,7 @@ export class DashboardV3 {
     ) {
       const labelPrefix = this.stats.mode === "paper" ? "Paper " : "";
       this.targetBox.setLabel(
-        ` 📊 ${labelPrefix}Holdings (${this.livePositions.length}) `
+        ` 📊 ${labelPrefix}Holdings` //(${this.livePositions.length})
       );
 
       // Show ALL positions with full details
@@ -804,7 +804,7 @@ export class DashboardV3 {
     let line1 = `{gray-fg}${time}{/} ${activityIcon} {yellow-fg}TARGET:{/} `;
     line1 += `${targetShares.padStart(
       5
-    )}@$${targetPrice} -- $${targetTotal.padStart(5)}`;
+    )} @ $${targetPrice} -- $${targetTotal.padStart(5)}`;
     line1 += ` {magenta-fg}${market}{/}`;
 
     this.logBox.log(line1);

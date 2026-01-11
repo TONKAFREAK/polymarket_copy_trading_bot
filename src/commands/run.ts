@@ -338,34 +338,44 @@ export function createRunCommand(): Command {
                   sessionTrades.count > 0
                     ? (sessionTrades.successCount / sessionTrades.count) * 100
                     : 0;
-                activeDashboard.updateStats({
-                  balance: liveStats.balance,
-                  openOrdersCount: liveStats.openOrdersCount,
-                  totalTrades: sessionTrades.count,
-                  positionsValue: sessionTrades.totalValue,
-                  winRate,
-                });
 
-                // Fetch and display positions (only for V3 dashboard)
+                // Fetch positions first so portfolio value mirrors holdings
+                let positionsValue = sessionTrades.totalValue;
+                let openPositionsCount = 0;
+
                 if (dashboardV3) {
                   try {
                     const positionsData = await executor.getPositions();
-                    if (positionsData.positions.length > 0) {
-                      const livePositions: LivePosition[] =
-                        positionsData.positions.map((p) => ({
-                          tokenId: p.tokenId,
-                          outcome: p.outcome,
-                          shares: p.shares,
-                          avgEntryPrice: p.avgEntryPrice,
-                          currentValue: p.currentValue,
-                          market: p.market,
-                        }));
-                      dashboardV3.setPositions(livePositions);
-                    }
+                    positionsValue = positionsData.totalValue;
+                    openPositionsCount = positionsData.positions.length;
+
+                    // Always push the latest positions so status icons can update
+                    const livePositions: LivePosition[] =
+                      positionsData.positions.map((p) => ({
+                        tokenId: p.tokenId,
+                        outcome: p.outcome,
+                        shares: p.shares,
+                        avgEntryPrice: p.avgEntryPrice,
+                        currentValue: p.currentValue,
+                        market: p.market,
+                        isResolved: p.isResolved,
+                        isRedeemable: p.isRedeemable,
+                        conditionId: p.conditionId,
+                      }));
+                    dashboardV3.setPositions(livePositions);
                   } catch {
                     // Silently ignore position fetch errors
                   }
                 }
+
+                activeDashboard.updateStats({
+                  balance: liveStats.balance,
+                  openOrdersCount: liveStats.openOrdersCount,
+                  totalTrades: sessionTrades.count,
+                  positionsValue,
+                  openPositions: openPositionsCount || undefined,
+                  winRate,
+                });
               } catch {
                 // Silently ignore live stats errors
               }

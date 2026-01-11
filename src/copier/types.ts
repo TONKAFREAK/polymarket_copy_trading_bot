@@ -71,6 +71,8 @@ export interface TradingConfig {
   fixedSharesSize: number;
   /** Proportional multiplier (for proportional mode) */
   proportionalMultiplier: number;
+  /** Minimum order size in USD */
+  minOrderSize: number;
   /** Slippage tolerance (0.01 = 1%) */
   slippage: number;
 }

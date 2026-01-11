@@ -11,8 +11,18 @@ import { getStateManager, StateManager } from "../copier/state";
 import { createWatcher } from "../copier/watcher";
 import { createExecutor, Executor } from "../copier/executor";
 import { createRiskManager } from "../copier/risk";
+import { getPaperTradingManager } from "../copier/paperTrading";
 import { TradeSignal, AppConfig } from "../copier/types";
-import { getLogger, logError } from "../utils/logger";
+import {
+  getLogger,
+  logError,
+  enableDashboardMode,
+  disableDashboardMode,
+} from "../utils/logger";
+// Use V3 dashboard (blessed-based with improved UI)
+import { DashboardV3, getDashboardV3, LivePosition } from "../utils/dashboardV3";
+import { Dashboard, getDashboard } from "../utils/dashboard";
+import { getGammaApiClient } from "../polymarket/gammaApi";
 
 const logger = getLogger();
 
@@ -23,9 +33,8 @@ export function createRunCommand(): Command {
     .option("-d, --dry-run", "Enable dry-run mode (no real trades)")
     .option("--no-dry-run", "Disable dry-run mode (live trading)")
     .option("-v, --verbose", "Enable verbose logging")
+    .option("--no-dashboard", "Disable the live dashboard UI")
     .action(async (options) => {
-      console.log(chalk.bold.cyan("\n🚀 Polymarket Copy Trader\n"));
-
       // Validate environment
       const env = getEnvConfig();
       ensureDataDir(env.dataDir);
@@ -64,11 +73,17 @@ export function createRunCommand(): Command {
         process.exit(1);
       }
 
-      // Display configuration
-      displayConfig(config);
+      // Determine if we should use the dashboard
+      const useDashboard = options.dashboard !== false && !options.verbose;
 
-      // Show warning for live trading
-      if (!config.risk.dryRun) {
+      if (!useDashboard) {
+        // Display configuration in non-dashboard mode
+        console.log(chalk.bold.cyan("\n🚀 Polymarket Copy Trader\n"));
+        displayConfig(config);
+      }
+
+      // Show warning for live trading (not paper, not dry-run)
+      if (!config.risk.dryRun && !env.paperTrading) {
         console.log(chalk.bgRed.white.bold("\n ⚠️  LIVE TRADING MODE "));
         console.log(
           chalk.red("Real money will be used. Press Ctrl+C to abort.\n")
@@ -76,8 +91,21 @@ export function createRunCommand(): Command {
         await countdown(5);
       }
 
+      // Enable dashboard mode early to intercept library console output
+      if (useDashboard) {
+        enableDashboardMode();
+      }
+
       // Initialize components
       const spinner = ora("Initializing components...").start();
+
+// Dashboard can be either V3 (blessed) or V1 (chalk)
+        let dashboardV3: DashboardV3 | null = null;
+        let dashboard: Dashboard | null = null;
+        const useV3Dashboard = true; // Use new blessed-based dashboard
+
+        // Gamma API for fetching market names
+        const gammaApi = getGammaApiClient();
 
       try {
         // State manager
@@ -95,54 +123,305 @@ export function createRunCommand(): Command {
         );
         await executor.initialize();
 
+        // Get paper trading manager if enabled
+        const paperTradingManager = env.paperTrading
+          ? getPaperTradingManager(env.dataDir, env.paperStartingBalance)
+          : null;
+
+        // Initialize dashboard if enabled
+        if (useDashboard) {
+          // Try to use V3 dashboard (blessed-based), fall back to V1 if issues
+          if (useV3Dashboard) {
+            try {
+              dashboardV3 = getDashboardV3();
+              // Set target addresses for display
+              dashboardV3.setTargets(config.targets);
+            } catch {
+              // Fall back to old dashboard
+              dashboard = getDashboard();
+            }
+          } else {
+            dashboard = getDashboard();
+          }
+
+          // Set initial stats
+          const mode = config.risk.dryRun
+            ? "dry-run"
+            : env.paperTrading
+            ? "paper"
+            : "live";
+
+          // Calculate initial positions value
+          let initialPositionsValue = 0;
+          let initialOpenPositions = 0;
+          let liveBalance = 0;
+          let liveOpenOrdersCount = 0;
+          
+          if (paperTradingManager) {
+            const positions = paperTradingManager.getPositions();
+            Object.values(positions).forEach((pos) => {
+              if (!pos.settled && pos.shares > 0) {
+                initialPositionsValue +=
+                  (pos.currentPrice || pos.avgEntryPrice) * pos.shares;
+                initialOpenPositions++;
+              }
+            });
+          } else if (mode === "live") {
+            // Fetch live stats from CLOB client
+            try {
+              const liveStats = await executor.getLiveStats();
+              liveBalance = liveStats.balance;
+              liveOpenOrdersCount = liveStats.openOrdersCount;
+            } catch (e) {
+              logger.error("Failed to fetch initial live stats", { error: (e as Error).message });
+            }
+          }
+
+          const initialStats = paperTradingManager
+            ? {
+                mode: mode as "dry-run" | "paper" | "live",
+                balance: paperTradingManager.getBalance(),
+                startingBalance: paperTradingManager.getStats().startingBalance,
+                openPositions: initialOpenPositions,
+                positionsValue: initialPositionsValue,
+                unrealizedPnl:
+                  paperTradingManager.getStats().totalUnrealizedPnl,
+                realizedPnl: paperTradingManager.getStats().totalRealizedPnl,
+                totalTrades: paperTradingManager.getStats().totalTrades,
+                winRate: paperTradingManager.getStats().winRate,
+                totalFees: paperTradingManager.getStats().totalFees,
+                pollingInterval: config.polling.intervalMs,
+                targetsCount: config.targets.length,
+              }
+            : {
+                mode: mode as "dry-run" | "paper" | "live",
+                balance: liveBalance,
+                startingBalance: liveBalance, // For live mode, starting balance = current balance
+                openPositions: 0,
+                positionsValue: 0,
+                unrealizedPnl: 0,
+                openOrdersCount: liveOpenOrdersCount,
+                realizedPnl: 0,
+                totalTrades: 0,
+                winRate: 0,
+                totalFees: 0,
+                pollingInterval: config.polling.intervalMs,
+                targetsCount: config.targets.length,
+              };
+
+          // Update either dashboard
+          if (dashboardV3) {
+            dashboardV3.updateStats(initialStats);
+          } else if (dashboard) {
+            dashboard.updateStats(initialStats);
+          }
+        }
+
+        // Session trade tracker for live mode
+        const sessionTrades = {
+          count: 0,
+          totalValue: 0,
+          successCount: 0,
+        };
+
+        // Helper to get active dashboard for logging
+        const getActiveDashboard = () => dashboardV3 || dashboard;
+
         // Watcher with event handlers
         const watcher = createWatcher(config.targets, config.polling, {
           onTradeDetected: async (signal: TradeSignal) => {
-            await handleTradeDetected(signal, executor, stateManager);
+            const result = await handleTradeDetected(
+              signal,
+              executor,
+              stateManager,
+              getActiveDashboard(),
+              paperTradingManager,
+              gammaApi
+            );
+            
+            // Track session stats for live mode
+            if (result && !paperTradingManager) {
+              sessionTrades.count++;
+              if (result.success) {
+                sessionTrades.successCount++;
+                sessionTrades.totalValue += result.value;
+              }
+            }
           },
           onError: (error: Error, context: string) => {
             logError(logger, error, context);
             stateManager.setLastError(error.message);
+            const activeDashboard = getActiveDashboard();
+            if (activeDashboard) {
+              activeDashboard.logError(error.message, context);
+            }
           },
         });
 
         spinner.succeed("Components initialized");
 
         // Start the watcher
-        console.log(chalk.green("\n✅ Starting copy trader...\n"));
         stateManager.start();
         await watcher.start();
 
-        // Display running status
-        console.log(chalk.gray("─".repeat(50)));
-        console.log(chalk.bold("Status:"), chalk.green("RUNNING"));
-        console.log(
-          chalk.bold("Polling Interval:"),
-          `${config.polling.intervalMs}ms`
-        );
-        console.log(
-          chalk.bold("Mode:"),
-          config.risk.dryRun ? chalk.yellow("DRY RUN") : chalk.red("LIVE")
-        );
-        console.log(chalk.gray("─".repeat(50)));
-        console.log(chalk.gray("\nPress Ctrl+C to stop.\n"));
+        if (useDashboard && (dashboardV3 || dashboard)) {
+          // Start the active dashboard
+          const activeDashboard = dashboardV3 || dashboard!;
+          activeDashboard.start();
+          activeDashboard.logInfo(
+            "Copy trader started",
+            `Watching ${config.targets.length} target(s)`
+          );
 
-        // Handle graceful shutdown
-        const shutdown = async () => {
-          console.log(chalk.yellow("\n\nShutting down..."));
-          await watcher.stop();
-          stateManager.stop();
-          await stateManager.close();
-          console.log(chalk.green("Goodbye! 👋\n"));
-          process.exit(0);
-        };
+          // Set up price/resolution check interval (every 30 seconds)
+          // This checks for resolved markets and updates prices
+          const priceUpdateInterval = setInterval(async () => {
+            if (paperTradingManager) {
+              try {
+                const settlementResult = await paperTradingManager.updatePrices();
+                if (settlementResult && settlementResult.settled > 0) {
+                  const pnlStr = settlementResult.totalPnl >= 0 
+                    ? `+$${settlementResult.totalPnl.toFixed(2)}` 
+                    : `-$${Math.abs(settlementResult.totalPnl).toFixed(2)}`;
+                  activeDashboard.logInfo(
+                    `Settled ${settlementResult.settled} position(s)`,
+                    `${settlementResult.wins}W/${settlementResult.losses}L | PnL: ${pnlStr}`
+                  );
+                }
+              } catch {
+                // Silently ignore price update errors
+              }
+            }
+          }, 30000);
 
-        process.on("SIGINT", shutdown);
-        process.on("SIGTERM", shutdown);
+          // Set up stats refresh interval (every 2 seconds for UI)
+          // For live mode, also fetch real data from API
+          const statsRefresh = setInterval(async () => {
+            if (paperTradingManager) {
+              const stats = paperTradingManager.getStats();
+              const positions = paperTradingManager.getPositions();
+
+              // Calculate positions value (only non-settled positions with shares > 0)
+              let positionsValue = 0;
+              let openPositionsCount = 0;
+              Object.values(positions).forEach((pos) => {
+                if (!pos.settled && pos.shares > 0) {
+                  positionsValue +=
+                    (pos.currentPrice || pos.avgEntryPrice) * pos.shares;
+                  openPositionsCount++;
+                }
+              });
+
+              activeDashboard.updateStats({
+                balance: paperTradingManager.getBalance(),
+                openPositions: openPositionsCount,
+                positionsValue,
+                unrealizedPnl: stats.totalUnrealizedPnl,
+                realizedPnl: stats.totalRealizedPnl,
+                totalTrades: stats.totalTrades,
+                winRate: stats.winRate,
+                totalFees: stats.totalFees,
+              });
+            } else if (!config.risk.dryRun && !env.paperTrading) {
+              // Live mode - fetch real stats from API + session stats + positions
+              try {
+                const liveStats = await executor.getLiveStats();
+                const winRate = sessionTrades.count > 0 
+                  ? (sessionTrades.successCount / sessionTrades.count) * 100 
+                  : 0;
+                activeDashboard.updateStats({
+                  balance: liveStats.balance,
+                  openOrdersCount: liveStats.openOrdersCount,
+                  totalTrades: sessionTrades.count,
+                  positionsValue: sessionTrades.totalValue,
+                  winRate,
+                });
+                
+                // Fetch and display positions (only for V3 dashboard)
+                if (dashboardV3) {
+                  try {
+                    const positionsData = await executor.getPositions();
+                    if (positionsData.positions.length > 0) {
+                      const livePositions: LivePosition[] = positionsData.positions.map(p => ({
+                        tokenId: p.tokenId,
+                        outcome: p.outcome,
+                        shares: p.shares,
+                        avgEntryPrice: p.avgEntryPrice,
+                        currentValue: p.currentValue,
+                        market: p.market,
+                      }));
+                      dashboardV3.setPositions(livePositions);
+                    }
+                  } catch {
+                    // Silently ignore position fetch errors
+                  }
+                }
+              } catch {
+                // Silently ignore live stats errors
+              }
+            }
+          }, 2000);
+
+          // Handle graceful shutdown
+          const shutdown = async () => {
+            clearInterval(priceUpdateInterval);
+            clearInterval(statsRefresh);
+            activeDashboard.stop();
+            disableDashboardMode(); // Re-enable console logging
+            console.log(chalk.yellow("\n\nShutting down..."));
+            await watcher.stop();
+            stateManager.stop();
+            await stateManager.close();
+            console.log(chalk.green("Goodbye! 👋\n"));
+            process.exit(0);
+          };
+
+          process.on("SIGINT", shutdown);
+          process.on("SIGTERM", shutdown);
+        } else {
+          // Non-dashboard mode
+          console.log(chalk.green("\n✅ Starting copy trader...\n"));
+          console.log(chalk.gray("─".repeat(50)));
+          console.log(chalk.bold("Status:"), chalk.green("RUNNING"));
+          console.log(
+            chalk.bold("Polling Interval:"),
+            `${config.polling.intervalMs}ms`
+          );
+
+          let modeStr: string;
+          if (config.risk.dryRun) {
+            modeStr = chalk.yellow("DRY RUN");
+          } else if (env.paperTrading) {
+            modeStr = chalk.blue("PAPER TRADING");
+          } else {
+            modeStr = chalk.red("LIVE");
+          }
+          console.log(chalk.bold("Mode:"), modeStr);
+          console.log(chalk.gray("─".repeat(50)));
+          console.log(chalk.gray("\nPress Ctrl+C to stop.\n"));
+
+          // Handle graceful shutdown
+          const shutdown = async () => {
+            console.log(chalk.yellow("\n\nShutting down..."));
+            await watcher.stop();
+            stateManager.stop();
+            await stateManager.close();
+            console.log(chalk.green("Goodbye! 👋\n"));
+            process.exit(0);
+          };
+
+          process.on("SIGINT", shutdown);
+          process.on("SIGTERM", shutdown);
+        }
 
         // Keep the process running
         await new Promise(() => {}); // Never resolves
       } catch (error) {
+        if (dashboardV3) {
+          dashboardV3.stop();
+        } else if (dashboard) {
+          dashboard.stop();
+        }
         spinner.fail("Failed to initialize");
         console.error(chalk.red((error as Error).message));
         process.exit(1);
@@ -154,49 +433,195 @@ export function createRunCommand(): Command {
 
 /**
  * Handle a detected trade
+ * Returns trade result info for session tracking
  */
 async function handleTradeDetected(
   signal: TradeSignal,
   executor: Executor,
-  stateManager: StateManager
-): Promise<void> {
-  console.log(chalk.cyan("\n📊 Trade Detected:"));
-  console.log(
-    chalk.gray(`  Target: ${signal.targetWallet.substring(0, 10)}...`)
-  );
-  console.log(
-    chalk.gray(
-      `  Side: ${
-        signal.side === "BUY" ? chalk.green("BUY") : chalk.red("SELL")
-      }`
-    )
-  );
-  console.log(chalk.gray(`  Price: $${signal.price.toFixed(4)}`));
-  console.log(chalk.gray(`  Token: ${signal.tokenId.substring(0, 16)}...`));
+  stateManager: StateManager,
+  dashboard: Dashboard | DashboardV3 | null,
+  paperTradingManager:
+    | import("../copier/paperTrading").PaperTradingManager
+    | null,
+  gammaApi: import("../polymarket/gammaApi").GammaApiClient
+): Promise<{ success: boolean; value: number } | null> {
+  // Try to fetch market name from Gamma API
+  let marketName = signal.marketSlug || "";
+  
+  if (!marketName || marketName.length < 5) {
+    try {
+      // Try by token ID first
+      if (signal.tokenId && signal.tokenId.length > 20) {
+        const market = await gammaApi.getMarketByTokenId(signal.tokenId);
+        if (market) {
+          marketName = market.question || market.slug || signal.tokenId.substring(0, 30);
+        }
+      } else if (signal.conditionId) {
+        const market = await gammaApi.getMarketByConditionId(signal.conditionId);
+        if (market) {
+          marketName = market.question || market.slug || signal.conditionId.substring(0, 30);
+        }
+      }
+    } catch {
+      // Silently use fallback
+    }
+  }
+  
+  // Clean up market name for display
+  if (!marketName) {
+    marketName = signal.tokenId ? signal.tokenId.substring(0, 25) + "..." : "Unknown Market";
+  } else if (marketName.length > 60) {
+    marketName = marketName.substring(0, 57) + "...";
+  }
 
   // Execute the trade
   const result = await executor.execute(signal);
   await stateManager.recordExecution(result);
 
-  if (result.skipped) {
-    console.log(chalk.yellow(`  ⏭️  Skipped: ${result.skipReason}`));
-  } else if (result.result?.success) {
+  const orderId = result.result?.orderId || "N/A";
+
+  if (dashboard) {
+    // Dashboard mode - use enhanced activity logging if V3
+    if ('logTargetActivity' in dashboard) {
+      const dashboardV3 = dashboard as DashboardV3;
+      
+      // Log target activity with our copy result
+      dashboardV3.logTargetActivity({
+        activityType: signal.activityType || "TRADE",
+        side: signal.side,
+        targetWallet: signal.targetWallet,
+        targetShares: signal.sizeShares || 0,
+        targetPrice: signal.price,
+        marketName,
+        copied: result.result?.success === true && !result.skipped,
+        copyError: result.skipped ? result.skipReason : result.result?.errorMessage,
+        yourShares: result.order?.size,
+        yourPrice: result.order?.price,
+        orderId,
+      });
+      
+      // Update stats if paper trading
+      if (paperTradingManager) {
+        const stats = paperTradingManager.getStats();
+        const positions = paperTradingManager.getPositions();
+
+        let positionsValue = 0;
+        let openPositionsCount = 0;
+        Object.values(positions).forEach((pos) => {
+          if (!pos.settled && pos.shares > 0) {
+            positionsValue +=
+              (pos.currentPrice || pos.avgEntryPrice) * pos.shares;
+            openPositionsCount++;
+          }
+        });
+
+        dashboardV3.updateStats({
+          balance: paperTradingManager.getBalance(),
+          openPositions: openPositionsCount,
+          positionsValue,
+          unrealizedPnl: stats.totalUnrealizedPnl,
+          realizedPnl: stats.totalRealizedPnl,
+          totalTrades: stats.totalTrades,
+          winRate: stats.winRate,
+          totalFees: stats.totalFees,
+        });
+      }
+      
+      // Return success/value for session tracking
+      if (result.skipped || !result.result?.success) {
+        return result.result?.success === false 
+          ? { success: false, value: 0 }
+          : null;
+      }
+      
+      const tradeValue = result.order ? result.order.price * result.order.size : 0;
+      return { success: true, value: tradeValue };
+      
+    } else {
+      // Fallback for old dashboard
+      if (result.skipped) {
+        dashboard.logSkip(result.skipReason || "Unknown reason", marketName);
+        return null;
+      } else if (result.result?.success) {
+        dashboard.logTrade(
+          signal.side,
+          result.order?.size || 0,
+          result.order?.price || signal.price,
+          marketName,
+          orderId
+        );
+
+        // Update stats if paper trading
+        if (paperTradingManager) {
+          const stats = paperTradingManager.getStats();
+          const positions = paperTradingManager.getPositions();
+
+          let positionsValue = 0;
+          let openPositionsCount = 0;
+          Object.values(positions).forEach((pos) => {
+            if (!pos.settled && pos.shares > 0) {
+              positionsValue +=
+                (pos.currentPrice || pos.avgEntryPrice) * pos.shares;
+              openPositionsCount++;
+            }
+          });
+
+          dashboard.updateStats({
+            balance: paperTradingManager.getBalance(),
+            openPositions: openPositionsCount,
+            positionsValue,
+            unrealizedPnl: stats.totalUnrealizedPnl,
+            realizedPnl: stats.totalRealizedPnl,
+            totalTrades: stats.totalTrades,
+            winRate: stats.winRate,
+            totalFees: stats.totalFees,
+          });
+        }
+
+        const tradeValue = result.order ? result.order.price * result.order.size : 0;
+        return { success: true, value: tradeValue };
+      } else {
+        dashboard.logError(
+          result.result?.errorMessage || "Order failed",
+          marketName
+        );
+        return { success: false, value: 0 };
+      }
+    }
+  } else {
+    // Console mode
+    console.log(chalk.cyan("\n📊 Trade Detected:"));
+    console.log(chalk.gray(`  Market: ${marketName}`));
     console.log(
-      chalk.green(
-        `  ✅ Order ${result.dryRun ? "Simulated" : "Placed"}: ${
-          result.result.orderId
-        }`
-      )
+      chalk.gray(`  Target: ${signal.targetWallet.substring(0, 10)}...`)
     );
     console.log(
       chalk.gray(
-        `     Size: ${result.order?.size.toFixed(
-          2
-        )} shares @ $${result.order?.price.toFixed(4)}`
+        `  Side: ${
+          signal.side === "BUY" ? chalk.green("BUY") : chalk.red("SELL")
+        }`
       )
     );
-  } else {
-    console.log(chalk.red(`  ❌ Order Failed: ${result.result?.errorMessage}`));
+    console.log(chalk.gray(`  Target Fill: ${signal.sizeShares?.toFixed(2) || '?'} shares @ $${signal.price.toFixed(4)}`));
+    console.log(chalk.gray(`  Your Order: ${result.order?.size.toFixed(2) || '?'} shares @ $${result.order?.price?.toFixed(4) || signal.price.toFixed(4)}`));
+
+    if (result.skipped) {
+      console.log(chalk.yellow(`  ⏭️  Skipped: ${result.skipReason}`));
+      return null;
+    } else if (result.result?.success) {
+      console.log(
+        chalk.green(
+          `  ✅ Order ${result.dryRun ? "Simulated" : "Placed"}: ${orderId}`
+        )
+      );
+      const tradeValue = result.order ? result.order.price * result.order.size : 0;
+      return { success: true, value: tradeValue };
+    } else {
+      console.log(
+        chalk.red(`  ❌ Order Failed: ${result.result?.errorMessage}`)
+      );
+      return { success: false, value: 0 };
+    }
   }
 }
 

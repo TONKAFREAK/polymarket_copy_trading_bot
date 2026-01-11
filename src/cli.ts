@@ -23,7 +23,11 @@ import {
   createTargetsCommand,
   createConfigCommand,
   createStatsCommand,
+  createPaperCommand,
+  createApproveCommand,
 } from "./commands";
+import { createRedeemCommand } from "./commands/redeemCmd";
+import { createDiagnoseCommand } from "./commands/diagnose";
 
 // ASCII Banner
 const banner = `
@@ -70,6 +74,10 @@ program.addCommand(createStatusCommand());
 program.addCommand(createTargetsCommand());
 program.addCommand(createConfigCommand());
 program.addCommand(createStatsCommand());
+program.addCommand(createPaperCommand());
+program.addCommand(createApproveCommand());
+program.addCommand(createRedeemCommand());
+program.addCommand(createDiagnoseCommand());
 
 // Default action (no command)
 program.action(() => {
@@ -104,6 +112,9 @@ program.action(() => {
   console.log(chalk.bold("\nAvailable Commands:"));
   console.log(`  ${chalk.cyan("init")}      Initialize configuration`);
   console.log(`  ${chalk.cyan("run")}       Start the copy trading bot`);
+  console.log(`  ${chalk.cyan("approve")}   Approve on-chain allowances (required once)`);
+  console.log(`  ${chalk.cyan("diagnose")}  Check wallet configuration and balances`);
+  console.log(`  ${chalk.cyan("redeem")}    Redeem winnings from resolved markets`);
   console.log(`  ${chalk.cyan("status")}    Show current status`);
   console.log(`  ${chalk.cyan("stats")}     Show paper trading performance`);
   console.log(`  ${chalk.cyan("targets")}   Manage target wallets`);

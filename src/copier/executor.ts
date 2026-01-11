@@ -90,6 +90,12 @@ export class Executor {
   async execute(signal: TradeSignal): Promise<ExecutionResult> {
     const timestamp = Date.now();
 
+    // Special handling for REDEEM activities
+    // REDEEM means the market resolved - we should settle our position, not trade
+    if (signal.activityType === "REDEEM") {
+      return this.handleRedeem(signal, timestamp);
+    }
+
     // Calculate trade size
     const { size, usdValue } = this.calculateSize(signal);
 
@@ -218,10 +224,32 @@ export class Executor {
 
     // Round size to reasonable precision
     size = Math.round(size * 100) / 100;
+    usdValue = size * signal.price;
 
-    // Ensure minimum size
-    if (size < 0.01) {
-      size = 0.01;
+    // Polymarket requires minimum 5 shares per order
+    const MIN_SHARES = 5;
+    if (size < MIN_SHARES) {
+      logger.debug("Order size below Polymarket minimum, adjusting", {
+        originalSize: size,
+        minRequired: MIN_SHARES,
+      });
+      size = MIN_SHARES;
+      usdValue = size * signal.price;
+    }
+
+    // Also enforce minimum USD value if configured
+    const minOrderSizeUsd = this.tradingConfig.minOrderSize || 0;
+    if (minOrderSizeUsd > 0 && usdValue < minOrderSizeUsd && signal.price > 0) {
+      // Calculate minimum shares needed to meet minimum order size
+      size = Math.ceil((minOrderSizeUsd / signal.price) * 100) / 100;
+      // Ensure we still meet the 5 share minimum
+      size = Math.max(size, MIN_SHARES);
+      usdValue = size * signal.price;
+      logger.debug("Order size adjusted to meet minimum USD", {
+        minOrderSizeUsd,
+        adjustedSize: size,
+        adjustedUsdValue: usdValue.toFixed(2),
+      });
     }
 
     return { size, usdValue };
@@ -256,12 +284,23 @@ export class Executor {
    * Resolve token ID from signal
    */
   private async resolveTokenId(signal: TradeSignal): Promise<string | null> {
-    // If tokenId is already valid, use it
+    // If tokenId is already valid (long numeric string), use it directly
     if (signal.tokenId && signal.tokenId.length > 20) {
+      logger.debug("Using token ID from signal", {
+        tokenId: signal.tokenId.substring(0, 20) + "...",
+      });
       return signal.tokenId;
     }
 
     // Try to resolve using available information
+    logger.debug("Resolving token ID", {
+      hasTokenId: !!signal.tokenId,
+      tokenIdLength: signal.tokenId?.length || 0,
+      hasConditionId: !!signal.conditionId,
+      hasSlug: !!signal.marketSlug,
+      outcome: signal.outcome,
+    });
+
     const resolved = await this.tokenResolver.resolveTokenId({
       tokenId: signal.tokenId,
       conditionId: signal.conditionId,
@@ -269,7 +308,130 @@ export class Executor {
       outcome: signal.outcome,
     });
 
+    if (!resolved) {
+      logger.warn("Failed to resolve token ID", {
+        tokenId: signal.tokenId,
+        conditionId: signal.conditionId,
+        marketSlug: signal.marketSlug,
+        outcome: signal.outcome,
+        activityType: signal.activityType,
+      });
+    }
+
     return resolved;
+  }
+
+  /**
+   * Handle REDEEM activity - settle positions when market resolves
+   * When target redeems, we also try to redeem our matching position
+   */
+  private async handleRedeem(
+    signal: TradeSignal,
+    timestamp: number
+  ): Promise<ExecutionResult> {
+    logger.info("Processing REDEEM activity", {
+      market: signal.marketSlug,
+      tokenId: signal.tokenId?.substring(0, 16) + "...",
+      price: signal.price,
+    });
+
+    // For paper trading, settle the position
+    if (this.paperTradingEnabled && this.paperTradingManager) {
+      const result = await this.paperTradingManager.handleRedeem(signal);
+      return {
+        signal,
+        result,
+        skipped: false,
+        dryRun: false,
+        timestamp,
+      };
+    }
+
+    // For dry-run, just log it
+    if (this.riskConfig.dryRun) {
+      logger.info("REDEEM (dry-run): Market resolved", {
+        market: signal.marketSlug,
+        outcome: signal.outcome,
+      });
+      return {
+        signal,
+        result: {
+          success: true,
+          orderId: `REDEEM_DRY_${Date.now()}`,
+        },
+        skipped: false,
+        dryRun: true,
+        timestamp,
+      };
+    }
+
+    // For live trading, attempt to redeem our position for the same token
+    if (signal.tokenId) {
+      try {
+        // Import and call the redeem function
+        const { redeemByTokenId } = await import("../commands/redeem");
+        const result = await redeemByTokenId(signal.tokenId);
+        
+        if (result.success) {
+          logger.info("Auto-redemption succeeded", {
+            market: result.marketName,
+            usdcGained: result.usdcGained,
+            txHash: result.txHash,
+          });
+          return {
+            signal,
+            result: {
+              success: true,
+              orderId: result.txHash || `REDEEM_${Date.now()}`,
+              executedPrice: result.usdcGained,
+            },
+            skipped: false,
+            dryRun: false,
+            timestamp,
+          };
+        } else {
+          // Redemption failed but not a critical error
+          logger.warn("Auto-redemption failed", {
+            market: result.marketName,
+            error: result.error,
+          });
+          return {
+            signal,
+            result: {
+              success: false,
+              errorMessage: result.error || "Redemption failed",
+            },
+            skipped: false,
+            dryRun: false,
+            timestamp,
+          };
+        }
+      } catch (error) {
+        logger.error("Failed to auto-redeem", {
+          tokenId: signal.tokenId.substring(0, 16) + "...",
+          error: (error as Error).message,
+        });
+        return {
+          signal,
+          result: {
+            success: false,
+            errorMessage: (error as Error).message,
+          },
+          skipped: false,
+          dryRun: false,
+          timestamp,
+        };
+      }
+    }
+
+    // No token ID available - skip
+    return {
+      signal,
+      skipped: true,
+      skipReason: "REDEEM: No token ID available for redemption",
+      dryRun: false,
+      timestamp,
+    };
   }
 
   /**
@@ -337,10 +499,121 @@ export class Executor {
   }
 
   /**
+   * Get live balance from CLOB client
+   */
+  async getLiveBalance(): Promise<number> {
+    if (!this.clobClient) {
+      return 0;
+    }
+    try {
+      const balances = await this.clobClient.getBalances();
+      return parseFloat(balances.usdc) || 0;
+    } catch (error) {
+      logger.error("Failed to get live balance", { error: (error as Error).message });
+      return 0;
+    }
+  }
+
+  /**
+   * Get live stats for dashboard (balance, open orders, trades)
+   */
+  async getLiveStats(): Promise<{
+    balance: number;
+    openOrdersCount: number;
+    recentTradesCount: number;
+    totalVolume: number;
+  }> {
+    if (!this.clobClient) {
+      return {
+        balance: 0,
+        openOrdersCount: 0,
+        recentTradesCount: 0,
+        totalVolume: 0,
+      };
+    }
+    try {
+      return await this.clobClient.getLiveStats();
+    } catch (error) {
+      logger.error("Failed to get live stats", { error: (error as Error).message });
+      return {
+        balance: 0,
+        openOrdersCount: 0,
+        recentTradesCount: 0,
+        totalVolume: 0,
+      };
+    }
+  }
+
+  /**
+   * Get open orders from CLOB
+   */
+  async getOpenOrders(): Promise<unknown[]> {
+    if (!this.clobClient) {
+      return [];
+    }
+    try {
+      return await this.clobClient.getOpenOrders();
+    } catch (error) {
+      logger.error("Failed to get open orders", { error: (error as Error).message });
+      return [];
+    }
+  }
+
+  /**
+   * Get recent trades from CLOB
+   */
+  async getTrades(): Promise<{
+    trades: Array<Record<string, unknown>>;
+    count: number;
+  }> {
+    if (!this.clobClient) {
+      return { trades: [], count: 0 };
+    }
+    try {
+      return await this.clobClient.getTrades();
+    } catch (error) {
+      logger.error("Failed to get trades", { error: (error as Error).message });
+      return { trades: [], count: 0 };
+    }
+  }
+
+  /**
+   * Get current positions (aggregated from trade history)
+   */
+  async getPositions(): Promise<{
+    positions: Array<{
+      tokenId: string;
+      outcome: string;
+      shares: number;
+      avgEntryPrice: number;
+      currentValue: number;
+      market: string;
+    }>;
+    totalValue: number;
+  }> {
+    if (!this.clobClient) {
+      return { positions: [], totalValue: 0 };
+    }
+    try {
+      return await this.clobClient.getPositions();
+    } catch (error) {
+      logger.error("Failed to get positions", { error: (error as Error).message });
+      return { positions: [], totalValue: 0 };
+    }
+  }
+
+  /**
    * Get paper trading manager (for stats display)
    */
   getPaperTradingManager(): PaperTradingManager | null {
     return this.paperTradingManager;
+  }
+
+  /**
+   * Get the CLOB client wrapper for advanced operations
+   */
+  getClobClient(): ClobClientWrapper | null {
+    return this.clobClient;
   }
 }
 

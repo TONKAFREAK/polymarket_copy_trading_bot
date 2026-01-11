@@ -101,18 +101,19 @@ export class GammaApiClient {
   }
 
   /**
-   * Fetch market by token ID
+   * Fetch market by token ID (CLOB token ID)
+   * Uses clob_token_ids param which matches exactly, not token_id which returns multiple markets
    */
   async getMarketByTokenId(tokenId: string): Promise<GammaMarket | null> {
     try {
-      // First try to fetch markets and filter by token
+      // Use clob_token_ids parameter which returns exact match
       const response = await fetchWithRetry<GammaMarket[]>(
         this.client,
         {
           method: "GET",
           url: "/markets",
           params: {
-            token_id: tokenId,
+            clob_token_ids: tokenId,
           },
         },
         {
@@ -210,6 +211,12 @@ export class GammaApiClient {
   /**
    * Get market resolution info - determine if market is resolved and which outcome won
    * Returns: { resolved: boolean, winningOutcome: "YES" | "NO" | null, winningTokenId: string | null }
+   * 
+   * IMPORTANT: We only consider a market "resolved" if:
+   * 1. market.closed === true
+   * 2. AND one of the outcomePrices is >= 0.99 (indicating a definitive winner)
+   * 
+   * This prevents premature settlement of markets that are closed but not yet resolved.
    */
   async getMarketResolution(slug: string): Promise<{
     resolved: boolean;
@@ -228,10 +235,8 @@ export class GammaApiClient {
         };
       }
 
-      // Check if market is closed/resolved
-      const isResolved = market.closed === true;
-
-      if (!isResolved) {
+      // Market must be closed first
+      if (market.closed !== true) {
         return {
           resolved: false,
           winningOutcome: null,
@@ -246,6 +251,7 @@ export class GammaApiClient {
       let winningOutcome: "YES" | "NO" | null = null;
       let winningTokenId: string | null = null;
       let outcomePrices: number[] = [];
+      let winningIndex = -1;
 
       if (market.outcomePrices) {
         try {
@@ -262,14 +268,10 @@ export class GammaApiClient {
           if (outcomePrices.length >= 2) {
             if (outcomePrices[0] >= 0.99) {
               winningOutcome = "YES";
-              if (market.tokens && market.tokens.length > 0) {
-                winningTokenId = market.tokens[0].token_id;
-              }
+              winningIndex = 0;
             } else if (outcomePrices[1] >= 0.99) {
               winningOutcome = "NO";
-              if (market.tokens && market.tokens.length > 1) {
-                winningTokenId = market.tokens[1].token_id;
-              }
+              winningIndex = 1;
             }
           }
         } catch {
@@ -280,24 +282,46 @@ export class GammaApiClient {
         }
       }
 
-      // Also check CLOB token IDs to match
-      if (market.clobTokenIds) {
-        try {
-          const tokenIds = JSON.parse(market.clobTokenIds);
-          if (Array.isArray(tokenIds) && tokenIds.length >= 2) {
-            if (winningOutcome === "YES") {
-              winningTokenId = tokenIds[0];
-            } else if (winningOutcome === "NO") {
-              winningTokenId = tokenIds[1];
+      // Get winning token ID - prefer clobTokenIds (actual CLOB token IDs used in trading)
+      if (winningIndex >= 0) {
+        // First try clobTokenIds
+        if (market.clobTokenIds) {
+          try {
+            const tokenIds = JSON.parse(market.clobTokenIds);
+            if (Array.isArray(tokenIds) && tokenIds.length > winningIndex) {
+              winningTokenId = tokenIds[winningIndex];
             }
+          } catch {
+            // Ignore parse errors
           }
-        } catch {
-          // Ignore parse errors
+        }
+        
+        // Fallback to market.tokens
+        if (!winningTokenId && market.tokens && market.tokens.length > winningIndex) {
+          winningTokenId = market.tokens[winningIndex].token_id;
         }
       }
 
+      // CRITICAL: Only return resolved=true if we have a definitive winner
+      // This prevents settling positions before the market outcome is known
+      const hasDefinitiveWinner = winningIndex >= 0 && winningOutcome !== null;
+      
+      if (!hasDefinitiveWinner) {
+        logger.debug("Market closed but no definitive winner yet", {
+          slug,
+          closed: market.closed,
+          outcomePrices,
+        });
+        return {
+          resolved: false,
+          winningOutcome: null,
+          winningTokenId: null,
+          outcomePrices,
+        };
+      }
+
       return {
-        resolved: isResolved,
+        resolved: true,
         winningOutcome,
         winningTokenId,
         outcomePrices,
@@ -325,6 +349,133 @@ export class GammaApiClient {
       return null; // Market not resolved yet
     }
     return resolution.winningTokenId === tokenId;
+  }
+
+  /**
+   * Get market resolution by token ID (fallback when slug lookup fails)
+   * Returns resolution info if market is found and resolved
+   */
+  async getMarketResolutionByTokenId(tokenId: string): Promise<{
+    resolved: boolean;
+    winningOutcome: "YES" | "NO" | null;
+    winningTokenId: string | null;
+    outcomePrices: number[];
+    found: boolean;
+  }> {
+    try {
+      const market = await this.getMarketByTokenId(tokenId);
+      if (!market) {
+        return {
+          resolved: false,
+          winningOutcome: null,
+          winningTokenId: null,
+          outcomePrices: [],
+          found: false,
+        };
+      }
+
+      // Market found - now check resolution
+      const isResolved = market.closed === true;
+
+      if (!isResolved) {
+        return {
+          resolved: false,
+          winningOutcome: null,
+          winningTokenId: null,
+          outcomePrices: [],
+          found: true,
+        };
+      }
+
+      // Parse outcome prices and determine winner
+      let winningOutcome: "YES" | "NO" | null = null;
+      let winningTokenId: string | null = null;
+      let outcomePrices: number[] = [];
+      let winningIndex = -1;
+
+      if (market.outcomePrices) {
+        try {
+          if (market.outcomePrices.startsWith("[")) {
+            outcomePrices = JSON.parse(market.outcomePrices);
+          } else {
+            outcomePrices = market.outcomePrices
+              .split(",")
+              .map((p) => parseFloat(p));
+          }
+
+          if (outcomePrices.length >= 2) {
+            if (outcomePrices[0] >= 0.99) {
+              winningOutcome = "YES";
+              winningIndex = 0;
+            } else if (outcomePrices[1] >= 0.99) {
+              winningOutcome = "NO";
+              winningIndex = 1;
+            }
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+
+      // Get winning token ID - prefer clobTokenIds (actual CLOB token IDs)
+      if (winningIndex >= 0) {
+        // First try clobTokenIds (these are the actual token IDs used in trading)
+        if (market.clobTokenIds) {
+          try {
+            const clobIds = JSON.parse(market.clobTokenIds);
+            if (Array.isArray(clobIds) && clobIds.length > winningIndex) {
+              winningTokenId = clobIds[winningIndex];
+            }
+          } catch {
+            // Ignore parse errors
+          }
+        }
+        
+        // Fallback to market.tokens
+        if (!winningTokenId && market.tokens && market.tokens.length > winningIndex) {
+          winningTokenId = market.tokens[winningIndex].token_id;
+        }
+      }
+
+      // CRITICAL: Only return resolved=true if we have a definitive winner
+      // This prevents settling positions before the market outcome is known
+      const hasDefinitiveWinner = winningIndex >= 0 && winningOutcome !== null;
+
+      if (!hasDefinitiveWinner) {
+        logger.debug("Market closed but no definitive winner yet (by token)", {
+          tokenId,
+          closed: market.closed,
+          outcomePrices,
+        });
+        return {
+          resolved: false,
+          winningOutcome: null,
+          winningTokenId: null,
+          outcomePrices,
+          found: true,
+        };
+      }
+
+      return {
+        resolved: true,
+        winningOutcome,
+        winningTokenId,
+        outcomePrices,
+        found: true,
+      };
+    } catch (error) {
+      logger.debug("Failed to get market resolution by token ID", {
+        tokenId,
+        error: (error as Error).message,
+      });
+      return {
+        resolved: false,
+        winningOutcome: null,
+        winningTokenId: null,
+        outcomePrices: [],
+        found: false,
+      };
+    }
   }
 }
 

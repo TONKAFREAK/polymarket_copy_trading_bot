@@ -1,10 +1,13 @@
 /**
  * Polymarket CLOB Client wrapper
  * Handles order placement and wallet interaction
+ * Uses Builder Signing SDK for order attribution
  */
 
 import { ethers } from "ethers";
-import { ClobClient } from "@polymarket/clob-client";
+import { ClobClient, AssetType } from "@polymarket/clob-client";
+import { Side } from "@polymarket/clob-client/dist/types";
+import { BuilderConfig } from "@polymarket/builder-signing-sdk";
 import { OrderRequest, OrderResult, TradeSide } from "../copier/types";
 import { getEnvConfig } from "../config/env";
 import { getLogger } from "../utils/logger";
@@ -37,6 +40,9 @@ export class ClobClientWrapper {
   private wallet: ethers.Wallet | null = null;
   private config: ClobClientConfig;
   private initialized: boolean = false;
+  // Cache market params for faster order placement
+  private marketParamsCache: Map<string, { tickSize: string; negRisk: boolean; timestamp: number }> = new Map();
+  private readonly CACHE_TTL_MS = 60000; // 1 minute cache
 
   constructor(config: ClobClientConfig) {
     this.config = config;
@@ -79,18 +85,73 @@ export class ClobClientWrapper {
     const clobUrl =
       this.config.clobUrl || chainConfig.clobUrl || env.clobApiUrl;
 
-    this.client = new ClobClient(clobUrl, this.config.chainId, this.wallet);
-
-    // Derive API credentials if needed
-    try {
-      await this.client.createOrDeriveApiCreds();
-      logger.info("CLOB client initialized successfully");
-    } catch (error) {
-      logger.warn("Failed to derive API credentials, will try on first order", {
-        error: (error as Error).message,
-      });
+    // Check if we have Builder API credentials
+    const hasBuilderCreds = env.polyApiKey && env.polyApiSecret && env.polyPassphrase;
+    
+    if (!hasBuilderCreds) {
+      throw new Error(
+        "Builder API credentials required. Set POLY_API_KEY, POLY_API_SECRET, and POLY_PASSPHRASE in .env. " +
+        "Get these from https://builders.polymarket.com/"
+      );
     }
 
+    // Create Builder config for local signing (credentials stay on this server)
+    const builderConfig = new BuilderConfig({
+      localBuilderCreds: {
+        key: env.polyApiKey!,
+        secret: env.polyApiSecret!,
+        passphrase: env.polyPassphrase!,
+      }
+    });
+
+    logger.info("Builder credentials configured", {
+      keyPrefix: env.polyApiKey!.substring(0, 8) + "...",
+    });
+
+    // First, derive user API credentials from the wallet
+    // This creates/retrieves credentials for the wallet itself
+    const tempClient = new ClobClient(clobUrl, this.config.chainId, this.wallet);
+    
+    let userCreds;
+    try {
+      userCreds = await tempClient.createOrDeriveApiKey();
+      logger.info("User API credentials derived successfully");
+    } catch (error) {
+      logger.error("Failed to derive user API credentials", {
+        error: (error as Error).message,
+      });
+      throw new Error(
+        "Failed to derive API credentials. Make sure your wallet has been used on Polymarket. " +
+        "Visit https://polymarket.com and make at least one trade first."
+      );
+    }
+
+    // Initialize the full client with:
+    // - User credentials (for wallet authentication)
+    // - Builder config (for order attribution)
+    // signatureType: 0 = EOA wallet, 1 = Magic/Email, 2 = Safe proxy
+    const signatureType = env.polySignatureType;
+    const funderAddress = env.polyFunderAddress;
+    
+    logger.info("Setting up CLOB client", {
+      signatureType,
+      funderAddress: funderAddress || "(not set - using wallet address)",
+      walletAddress: this.wallet.address,
+    });
+    
+    this.client = new ClobClient(
+      clobUrl,
+      this.config.chainId,
+      this.wallet,
+      userCreds,
+      signatureType,
+      funderAddress, // Polymarket profile address for Magic/Email login
+      undefined, // options
+      false,     // useServerTime
+      builderConfig
+    );
+
+    logger.info("CLOB client initialized with Builder attribution");
     this.initialized = true;
   }
 
@@ -106,6 +167,7 @@ export class ClobClientWrapper {
 
   /**
    * Place an order on the CLOB
+   * Uses the current Polymarket API format with tickSize and negRisk
    */
   async placeOrder(request: OrderRequest): Promise<OrderResult> {
     if (!this.client || !this.wallet) {
@@ -120,19 +182,58 @@ export class ClobClientWrapper {
         size: request.size,
       });
 
-      // Create the order
-      const order = await this.client.createOrder({
-        tokenID: request.tokenId,
-        side: request.side,
-        price: request.price,
-        size: request.size,
-        feeRateBps: 0, // Use default fee rate
-        nonce: Date.now(),
-        expiration: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30, // 30 days
-      });
+      // Get market parameters (with caching for speed)
+      let tickSize = "0.01"; // Default
+      let negRisk = false;   // Default
+      
+      // Check cache first for faster order placement
+      const cached = this.marketParamsCache.get(request.tokenId);
+      if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
+        tickSize = cached.tickSize;
+        negRisk = cached.negRisk;
+        logger.debug("Using cached market params", { tickSize, negRisk });
+      } else {
+        try {
+          // Fetch in parallel for speed
+          const [fetchedTickSize, fetchedNegRisk] = await Promise.all([
+            this.client.getTickSize(request.tokenId),
+            this.client.getNegRisk(request.tokenId),
+          ]);
+          tickSize = fetchedTickSize;
+          negRisk = fetchedNegRisk;
+          // Cache for future orders
+          this.marketParamsCache.set(request.tokenId, { 
+            tickSize, 
+            negRisk, 
+            timestamp: Date.now() 
+          });
+        } catch (e) {
+          logger.debug("Using default market params", { tickSize, negRisk });
+        }
+      }
 
-      // Post the order
-      const response = await this.client.postOrder(order);
+      // Use createAndPostOrder for atomic order creation and posting
+      // This is the recommended method per Polymarket docs
+      // feeRateBps: 0 = maker order (no fees), helps get fills at exact price
+      const response = await this.client.createAndPostOrder(
+        {
+          tokenID: request.tokenId,
+          side: request.side === "BUY" ? Side.BUY : Side.SELL,
+          price: request.price,
+          size: request.size,
+          feeRateBps: 0, // Zero fees = maker order for better fills
+        },
+        {
+          tickSize,
+          negRisk,
+        }
+      );
+
+      // Log full response for debugging
+      logger.debug("Order response received", {
+        response: JSON.stringify(response),
+        hasOrderId: !!(response && response.orderID),
+      });
 
       if (response && response.orderID) {
         logger.info("Order placed successfully", {
@@ -150,9 +251,15 @@ export class ClobClientWrapper {
           executedSize: request.size,
         };
       } else {
+        // Log the full response to understand why no order ID
+        const errorMsg = response?.errorMsg || response?.error || "No order ID returned";
+        logger.warn("Order submission issue", {
+          response: JSON.stringify(response),
+          errorMsg,
+        });
         return {
           success: false,
-          errorMessage: "No order ID returned",
+          errorMessage: String(errorMsg),
         };
       }
     } catch (error) {
@@ -265,34 +372,48 @@ export class ClobClientWrapper {
   }
 
   /**
-   * Get wallet balances
+   * Get Polymarket account balances (USDC deposited in Polymarket, not on-chain)
    */
   async getBalances(): Promise<{ usdc: string; matic: string }> {
-    if (!this.wallet) {
+    if (!this.wallet || !this.client) {
       throw new Error("Client not initialized");
     }
 
     try {
+      // Get MATIC balance from wallet (on-chain)
       const maticBalance = await this.wallet.getBalance();
 
-      // USDC contract on Polygon
-      const usdcAddress = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
-      const usdcAbi = ["function balanceOf(address) view returns (uint256)"];
-      const usdcContract = new ethers.Contract(
-        usdcAddress,
-        usdcAbi,
-        this.wallet.provider
-      );
-      const usdcBalance = await usdcContract.balanceOf(this.wallet.address);
+      // Get USDC balance from Polymarket account (not on-chain!)
+      // This is the collateral balance deposited into Polymarket for trading
+      logger.info("Fetching Polymarket collateral balance...");
+      
+      const collateralBalance = await this.client.getBalanceAllowance({
+        asset_type: AssetType.COLLATERAL,
+      });
+
+      // Balance is returned in micro USDC (6 decimals), convert to USD
+      const rawBalance = collateralBalance.balance || "0";
+      const usdBalance = (parseFloat(rawBalance) / 1_000_000).toFixed(6);
+
+      logger.info("Polymarket balance fetched", {
+        rawBalance: rawBalance,
+        usdBalance: usdBalance,
+        maticBalance: ethers.utils.formatEther(maticBalance),
+        walletAddress: this.wallet.address,
+      });
 
       return {
-        usdc: ethers.utils.formatUnits(usdcBalance, 6),
+        usdc: usdBalance,
         matic: ethers.utils.formatEther(maticBalance),
       };
     } catch (error) {
-      logger.error("Failed to get balances", {
+      logger.error("Failed to get balances from Polymarket API", {
         error: (error as Error).message,
+        stack: (error as Error).stack,
+        walletAddress: this.wallet.address,
       });
+      
+      // Return 0 but log the full error for debugging
       return { usdc: "0", matic: "0" };
     }
   }
@@ -314,6 +435,356 @@ export class ClobClientWrapper {
       executedPrice: request.price,
       executedSize: request.size,
     };
+  }
+
+  /**
+   * Get trade history for the authenticated user
+   * Fetches all trades from the CLOB API
+   */
+  async getTrades(): Promise<{
+    trades: Array<{
+      id: string;
+      asset_id: string;
+      side: string;
+      size: string;
+      price: string;
+      market: string;
+      match_time: string;
+      outcome: string;
+    }>;
+    count: number;
+  }> {
+    if (!this.client) {
+      throw new Error("Client not initialized");
+    }
+
+    try {
+      // Use the CLOB client's getTrades method
+      const trades = await this.client.getTrades();
+      logger.debug(`Fetched ${trades?.length || 0} trades from CLOB API`);
+      
+      return {
+        trades: (trades || []).map((t) => ({
+          id: t.id,
+          asset_id: t.asset_id,
+          side: t.side,
+          size: t.size,
+          price: t.price,
+          market: t.market,
+          match_time: t.match_time,
+          outcome: t.outcome,
+        })),
+        count: trades?.length || 0,
+      };
+    } catch (error) {
+      logger.error("Failed to fetch trades", {
+        error: (error as Error).message,
+      });
+      return { trades: [], count: 0 };
+    }
+  }
+
+  /**
+   * Get paginated trade history with metadata
+   */
+  async getTradesPaginated(options?: { market?: string }): Promise<{
+    trades: Array<{
+      id: string;
+      asset_id: string;
+      side: string;
+      size: string;
+      price: string;
+      market: string;
+      match_time: string;
+      outcome: string;
+    }>;
+    next_cursor: string;
+    count: number;
+    limit: number;
+  }> {
+    if (!this.client) {
+      throw new Error("Client not initialized");
+    }
+
+    try {
+      const result = await this.client.getTradesPaginated(
+        options?.market ? { market: options.market } : undefined
+      );
+      return {
+        trades: (result.data || []).map((t) => ({
+          id: t.id,
+          asset_id: t.asset_id,
+          side: t.side,
+          size: t.size,
+          price: t.price,
+          market: t.market,
+          match_time: t.match_time,
+          outcome: t.outcome,
+        })),
+        next_cursor: result.next_cursor || "",
+        count: result.data?.length || 0,
+        limit: 100,
+      };
+    } catch (error) {
+      logger.error("Failed to fetch paginated trades", {
+        error: (error as Error).message,
+      });
+      return { trades: [], next_cursor: "", count: 0, limit: 100 };
+    }
+  }
+
+  /**
+   * Get current positions (aggregated from trade history)
+   * Returns net positions with shares held, average entry price, and resolution status
+   */
+  async getPositions(): Promise<{
+    positions: Array<{
+      tokenId: string;
+      outcome: string;
+      shares: number;
+      avgEntryPrice: number;
+      currentValue: number;
+      market: string;
+      conditionId?: string;
+      isResolved?: boolean;
+      isRedeemable?: boolean;
+    }>;
+    totalValue: number;
+  }> {
+    if (!this.client) {
+      throw new Error("Client not initialized");
+    }
+
+    try {
+      // Import gamma API for market info
+      const { getGammaApiClient } = await import("./gammaApi");
+      const gammaApi = getGammaApiClient();
+
+      // Fetch all trades
+      const { trades } = await this.getTrades();
+      
+      // Aggregate trades into positions by asset_id
+      const positionMap = new Map<string, {
+        tokenId: string;
+        outcome: string;
+        shares: number;
+        totalCost: number;
+        market: string;
+      }>();
+
+      for (const trade of trades) {
+        const tokenId = trade.asset_id;
+        const size = parseFloat(trade.size) || 0;
+        const price = parseFloat(trade.price) || 0;
+        const isBuy = trade.side === "BUY";
+
+        let pos = positionMap.get(tokenId);
+        if (!pos) {
+          pos = {
+            tokenId,
+            outcome: trade.outcome || "Yes",
+            shares: 0,
+            totalCost: 0,
+            market: trade.market,
+          };
+          positionMap.set(tokenId, pos);
+        }
+
+        if (isBuy) {
+          pos.shares += size;
+          pos.totalCost += size * price;
+        } else {
+          pos.shares -= size;
+          pos.totalCost -= size * price;
+        }
+      }
+
+      // Convert to array and filter out zero positions
+      const positions: Array<{
+        tokenId: string;
+        outcome: string;
+        shares: number;
+        avgEntryPrice: number;
+        currentValue: number;
+        market: string;
+        conditionId?: string;
+        isResolved?: boolean;
+        isRedeemable?: boolean;
+      }> = [];
+
+      let totalValue = 0;
+
+      for (const pos of positionMap.values()) {
+        if (Math.abs(pos.shares) >= 0.01) {
+          // Get current token balance to verify
+          const { balance } = await this.getTokenBalance(pos.tokenId);
+          // Balance is in micro-units (6 decimals), convert to actual shares
+          const rawBalance = parseFloat(balance) || 0;
+          const actualShares = rawBalance / 1_000_000;
+
+          if (actualShares >= 0.01) {
+            const avgPrice = pos.shares > 0 ? pos.totalCost / pos.shares : 0;
+            // Current value = shares * avg entry price
+            const currentValue = actualShares * avgPrice;
+            
+            // Fetch market info for resolution status
+            let marketName = pos.market || "Unknown";
+            let conditionId: string | undefined;
+            let isResolved = false;
+            let isRedeemable = false;
+            
+            try {
+              const marketInfo = await gammaApi.getMarketByTokenId(pos.tokenId);
+              if (marketInfo) {
+                marketName = String(marketInfo.question || marketInfo.title || pos.market || "Unknown");
+                conditionId = marketInfo.conditionId ? String(marketInfo.conditionId) : undefined;
+                isResolved = marketInfo.closed === true || String(marketInfo.closed) === "true";
+                
+                // Check if redeemable (resolved AND we might be a winner)
+                // For now, mark as redeemable if resolved - actual redemption will verify
+                if (isResolved && conditionId) {
+                  isRedeemable = true;
+                }
+              }
+            } catch {
+              // Ignore market fetch errors
+            }
+            
+            positions.push({
+              tokenId: pos.tokenId,
+              outcome: pos.outcome,
+              shares: actualShares,
+              avgEntryPrice: avgPrice,
+              currentValue,
+              market: marketName,
+              conditionId,
+              isResolved,
+              isRedeemable,
+            });
+
+            totalValue += currentValue;
+          }
+        }
+      }
+
+      logger.debug(`Found ${positions.length} open positions, total value: $${totalValue.toFixed(2)}`);
+
+      return { positions, totalValue };
+    } catch (error) {
+      logger.error("Failed to get positions", {
+        error: (error as Error).message,
+      });
+      return { positions: [], totalValue: 0 };
+    }
+  }
+
+  /**
+   * Get conditional token balance for a specific token ID
+   */
+  async getTokenBalance(tokenId: string): Promise<{ balance: string; allowance: string }> {
+    if (!this.client) {
+      throw new Error("Client not initialized");
+    }
+
+    try {
+      const result = await this.client.getBalanceAllowance({
+        asset_type: AssetType.CONDITIONAL,
+        token_id: tokenId,
+      });
+      return {
+        balance: result.balance || "0",
+        allowance: result.allowance || "0",
+      };
+    } catch (error) {
+      logger.error("Failed to get token balance", {
+        error: (error as Error).message,
+        tokenId: tokenId.substring(0, 16) + "...",
+      });
+      return { balance: "0", allowance: "0" };
+    }
+  }
+
+  /**
+   * Refresh/update balance cache
+   */
+  async updateBalanceCache(): Promise<void> {
+    if (!this.client) {
+      throw new Error("Client not initialized");
+    }
+
+    try {
+      await this.client.updateBalanceAllowance({
+        asset_type: AssetType.COLLATERAL,
+      });
+      logger.debug("Balance cache updated");
+    } catch (error) {
+      logger.error("Failed to update balance cache", {
+        error: (error as Error).message,
+      });
+    }
+  }
+
+  /**
+   * Get detailed live stats for dashboard
+   * Returns balance, open orders count, recent trade stats
+   */
+  async getLiveStats(): Promise<{
+    balance: number;
+    openOrdersCount: number;
+    recentTradesCount: number;
+    totalVolume: number;
+  }> {
+    if (!this.client || !this.wallet) {
+      throw new Error("Client not initialized");
+    }
+
+    try {
+      // Fetch in parallel for speed
+      const [balances, openOrders, trades] = await Promise.all([
+        this.getBalances(),
+        this.getOpenOrders(),
+        this.getTrades(),
+      ]);
+
+      // Calculate total volume from trades (trades may have various shapes)
+      let totalVolume = 0;
+      (trades.trades || []).forEach((trade: Record<string, unknown>) => {
+        const price = parseFloat(String(trade.price || 0)) || 0;
+        const size = parseFloat(String(trade.size || 0)) || 0;
+        totalVolume += price * size;
+      });
+
+      return {
+        balance: parseFloat(balances.usdc) || 0,
+        openOrdersCount: (openOrders as unknown[]).length,
+        recentTradesCount: trades.count,
+        totalVolume,
+      };
+    } catch (error) {
+      logger.error("Failed to get live stats", {
+        error: (error as Error).message,
+      });
+      return {
+        balance: 0,
+        openOrdersCount: 0,
+        recentTradesCount: 0,
+        totalVolume: 0,
+      };
+    }
+  }
+
+  /**
+   * Get the underlying CLOB client for advanced operations
+   */
+  getClient(): ClobClient | null {
+    return this.client;
+  }
+
+  /**
+   * Get the wallet
+   */
+  getWallet(): ethers.Wallet | null {
+    return this.wallet;
   }
 }
 

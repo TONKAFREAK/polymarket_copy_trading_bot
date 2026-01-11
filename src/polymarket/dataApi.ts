@@ -11,11 +11,11 @@ import { getLogger } from "../utils/logger";
 const logger = getLogger();
 
 /**
- * Activity types we can copy:
+ * Activity types we can copy/track:
  * - TRADE: Regular buy/sell trades (primary)
  * - SPLIT: Split collateral into YES/NO tokens (creates position)
  * - MERGE: Merge YES+NO tokens back into collateral (closes positions)
- * - REDEEM: Redeem winning tokens after market resolution
+ * - REDEEM: Redeem winning tokens after market resolution (settles P&L)
  *
  * Activity types we skip:
  * - REWARD: Liquidity rewards (not actionable)
@@ -26,7 +26,7 @@ const COPYABLE_ACTIVITY_TYPES = new Set<string>([
   "TRADE",
   "SPLIT",
   "MERGE",
-  "REDEEM",
+  "REDEEM", // Track REDEEMs to realize P&L on settled positions
 ]);
 
 const SKIPPED_ACTIVITY_TYPES = new Set<string>([
@@ -85,6 +85,8 @@ export class DataApiClient {
           params: {
             user: walletAddress,
             limit: tradeLimit,
+            sortBy: "TIMESTAMP",
+            sortDirection: "DESC",
           },
         },
         {
@@ -146,6 +148,8 @@ export class DataApiClient {
           params: {
             user: walletAddress,
             limit: activityLimit,
+            sortBy: "TIMESTAMP",
+            sortDirection: "DESC",
           },
         },
         {

@@ -24,8 +24,11 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@polymarket/builder-signing-sdk": "^0.0.8",
     "@polymarket/clob-client": "^4.4.0",
+    "@types/blessed": "^0.1.27",
     "axios": "^1.6.7",
+    "blessed": "^0.1.81",
     "chalk": "^4.1.2",
     "commander": "^12.0.0",
     "dotenv": "^16.4.1",

@@ -155,37 +155,57 @@ export class TokenResolver {
     marketSlug?: string;
     outcome?: "YES" | "NO";
   }): Promise<string | null> {
-    // If tokenId is already provided, verify it's valid
-    if (params.tokenId) {
-      const metadata = await this.getByTokenId(params.tokenId);
-      if (metadata) {
-        // Return the provided tokenId if it matches YES or NO
-        if (
-          params.tokenId === metadata.yesTokenId ||
-          params.tokenId === metadata.noTokenId
-        ) {
-          return params.tokenId;
+    // If tokenId is already provided and looks valid, use it directly
+    // Token IDs are long numeric strings (77+ digits)
+    if (params.tokenId && params.tokenId.length > 20) {
+      // Try to verify it exists in our cache or API
+      try {
+        const metadata = await this.getByTokenId(params.tokenId);
+        if (metadata) {
+          // Found it - return the matching token
+          if (
+            params.tokenId === metadata.yesTokenId ||
+            params.tokenId === metadata.noTokenId
+          ) {
+            return params.tokenId;
+          }
         }
+      } catch {
+        // API lookup failed - token might be expired/unavailable
+        logger.debug(
+          `Token lookup failed for ${params.tokenId.substring(
+            0,
+            20
+          )}..., using directly`
+        );
       }
-      // Even if we can't verify, if it looks like a valid token ID, use it
-      if (params.tokenId.length > 20) {
-        return params.tokenId;
-      }
+
+      // Even if we can't verify via API, use the token ID directly
+      // This is essential for short-term markets that expire quickly
+      return params.tokenId;
     }
 
     // Try to get metadata by condition ID
     if (params.conditionId) {
-      const metadata = await this.getByConditionId(params.conditionId);
-      if (metadata) {
-        return this.selectToken(metadata, params.outcome);
+      try {
+        const metadata = await this.getByConditionId(params.conditionId);
+        if (metadata) {
+          return this.selectToken(metadata, params.outcome);
+        }
+      } catch {
+        logger.debug(`Condition ID lookup failed: ${params.conditionId}`);
       }
     }
 
     // Try to get metadata by market slug
     if (params.marketSlug) {
-      const metadata = await this.getBySlug(params.marketSlug);
-      if (metadata) {
-        return this.selectToken(metadata, params.outcome);
+      try {
+        const metadata = await this.getBySlug(params.marketSlug);
+        if (metadata) {
+          return this.selectToken(metadata, params.outcome);
+        }
+      } catch {
+        logger.debug(`Slug lookup failed: ${params.marketSlug}`);
       }
     }
 

@@ -23,6 +23,10 @@ export function createStatsCommand(): Command {
     )
     .option("-s, --settle", "Force settlement check for resolved markets")
     .option(
+      "-f, --force",
+      "Force-settle unavailable markets as losses (use with --settle)"
+    )
+    .option(
       "-b, --balance <amount>",
       "Set starting balance when resetting",
       parseFloat
@@ -79,17 +83,42 @@ export function createStatsCommand(): Command {
         console.log(
           chalk.cyan("\n🔄 Checking for resolved markets to settle...\n")
         );
-        const result = await paperManager.settleResolvedPositions();
+
+        if (options.force) {
+          console.log(
+            chalk.yellow(
+              "⚠️  Force mode enabled - unavailable markets will be settled as losses\n"
+            )
+          );
+        }
+
+        const result = await paperManager.settleResolvedPositions(
+          options.force
+        );
         if (result.settled > 0) {
           console.log(chalk.green(`✅ Settled ${result.settled} position(s):`));
           console.log(
             chalk.gray(`   Wins: ${result.wins}, Losses: ${result.losses}`)
           );
+          if (result.forcedSettlements > 0) {
+            console.log(
+              chalk.yellow(
+                `   Forced settlements (unavailable markets): ${result.forcedSettlements}`
+              )
+            );
+          }
           console.log(
             chalk.gray(`   Total P&L: $${result.totalPnl.toFixed(2)}\n`)
           );
         } else {
           console.log(chalk.gray("No positions to settle.\n"));
+          if (!options.force) {
+            console.log(
+              chalk.gray(
+                "Tip: Use --force to settle unavailable markets as losses.\n"
+              )
+            );
+          }
         }
       }
 

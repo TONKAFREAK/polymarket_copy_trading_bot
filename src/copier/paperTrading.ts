@@ -263,6 +263,267 @@ export class PaperTradingManager {
   }
 
   /**
+   * Handle a REDEEM activity - settle our copied positions in the same market
+   * 
+   * When target redeems a token in a market, it means that market has resolved.
+   * We find ALL our positions in the SAME market (by marketSlug) and settle them.
+   * 
+   * The target's redemption price tells us what the winning payout was:
+   * - If they redeem at ~$1.0, they held the winning token
+   * - If they redeem at ~$0.0, they held the losing token
+   * 
+   * Since we copied their trade, if we have the SAME token, we have the same outcome.
+   * If we have a DIFFERENT token in the same market, we have the OPPOSITE outcome.
+   */
+  async handleRedeem(signal: TradeSignal): Promise<OrderResult> {
+    const redeemTokenId = signal.tokenId;
+    const marketSlug = signal.marketSlug;
+    
+    // Find all positions in the same market that are not yet settled
+    const positionsToSettle = Object.entries(this.state.positions).filter(
+      ([_tokenId, pos]) => 
+        pos.marketSlug === marketSlug && 
+        !pos.settled && 
+        pos.shares > 0
+    );
+
+    if (positionsToSettle.length === 0) {
+      // No positions to settle in this market
+      logger.debug("REDEEM detected but no matching open positions in market", {
+        market: marketSlug,
+        redeemTokenId: redeemTokenId.substring(0, 16) + "...",
+      });
+      return {
+        success: true,
+        orderId: `REDEEM_SKIP_${Date.now()}`,
+        executedPrice: signal.price,
+        executedSize: signal.sizeShares || 0,
+      };
+    }
+
+    // The target's redemption price tells us if THEIR token won or lost
+    // If they redeem at >= $0.5, their token won (pays $1)
+    // If they redeem at < $0.5, their token lost (pays $0)
+    const targetTokenWon = signal.price >= 0.5;
+
+    logger.info("REDEEM - settling positions in market", {
+      market: marketSlug,
+      redeemTokenId: redeemTokenId.substring(0, 16) + "...",
+      targetRedemptionPrice: signal.price.toFixed(4),
+      targetTokenWon,
+      positionsToSettle: positionsToSettle.length,
+    });
+
+    let totalSettledShares = 0;
+    let totalPnl = 0;
+
+    for (const [tokenId, position] of positionsToSettle) {
+      // Determine if OUR token won:
+      // If our tokenId matches the redeem tokenId, we have the same outcome as target
+      // If our tokenId is different, we have the opposite token (in a binary market)
+      const ourTokenMatchesRedeem = tokenId === redeemTokenId;
+      const ourTokenWon = ourTokenMatchesRedeem ? targetTokenWon : !targetTokenWon;
+      const settlementPrice = ourTokenWon ? 1.0 : 0.0;
+
+      // Calculate P&L
+      const settlementValue = position.shares * settlementPrice;
+      const costBasis = position.totalCost;
+      const pnl = settlementValue - costBasis;
+
+      logger.info("Settling position from REDEEM", {
+        tokenId: tokenId.substring(0, 16) + "...",
+        outcome: position.outcome,
+        shares: position.shares.toFixed(2),
+        ourTokenMatchesRedeem,
+        ourTokenWon,
+        settlementPrice,
+        costBasis: costBasis.toFixed(2),
+        settlementValue: settlementValue.toFixed(2),
+        pnl: pnl.toFixed(2),
+      });
+
+      // Create trade record for the settlement
+      const trade: PaperTrade = {
+        id: `paper-redeem-${Date.now()}-${Math.random()
+          .toString(36)
+          .substr(2, 9)}`,
+        timestamp: Date.now(),
+        tokenId,
+        marketSlug: position.marketSlug,
+        outcome: position.outcome,
+        side: "SELL",
+        price: settlementPrice,
+        shares: position.shares,
+        usdValue: settlementValue,
+        fees: 0,
+        pnl,
+        targetWallet: signal.targetWallet,
+        tradeId: signal.tradeId,
+      };
+
+      // Update balance with settlement
+      this.state.currentBalance += settlementValue;
+
+      // Update position
+      position.resolved = true;
+      position.settled = true;
+      position.settlementPrice = settlementPrice;
+      position.settlementPnl = pnl;
+      totalSettledShares += position.shares;
+      position.shares = 0;
+
+      // Update stats
+      this.state.stats.totalRealizedPnl += pnl;
+      totalPnl += pnl;
+
+      if (pnl > 0) {
+        this.state.stats.winningTrades++;
+        this.state.stats.largestWin = Math.max(this.state.stats.largestWin, pnl);
+      } else if (pnl < 0) {
+        this.state.stats.losingTrades++;
+        this.state.stats.largestLoss = Math.min(
+          this.state.stats.largestLoss,
+          pnl
+        );
+      }
+
+      this.state.trades.push(trade);
+    }
+
+    // Update win rate
+    const closedTrades =
+      this.state.stats.winningTrades + this.state.stats.losingTrades;
+    this.state.stats.winRate =
+      closedTrades > 0
+        ? (this.state.stats.winningTrades / closedTrades) * 100
+        : 0;
+
+    this.saveState();
+
+    return {
+      success: true,
+      orderId: `redeem-batch-${Date.now()}`,
+      executedPrice: signal.price,
+      executedSize: totalSettledShares,
+    };
+  }
+
+  /**
+   * Manually settle expired positions that couldn't be resolved via API
+   * This is used when markets have expired but we never received a REDEEM signal
+   * 
+   * @param assumeWin - If true, assume positions won. If false, assume they lost.
+   * @param marketSlug - Optional: only settle positions in this specific market
+   * @returns Summary of settlements
+   */
+  async settleExpiredPositions(
+    assumeWin: boolean = false,
+    marketSlug?: string
+  ): Promise<{
+    settled: number;
+    totalPnl: number;
+    positionsSettled: string[];
+  }> {
+    const expiredPositions = this.getExpiredPositions().filter(
+      (p) => !marketSlug || p.marketSlug === marketSlug
+    );
+
+    if (expiredPositions.length === 0) {
+      return { settled: 0, totalPnl: 0, positionsSettled: [] };
+    }
+
+    logger.info("Force-settling expired positions", {
+      count: expiredPositions.length,
+      assumeWin,
+      marketSlug: marketSlug || "all",
+    });
+
+    let totalPnl = 0;
+    const positionsSettled: string[] = [];
+
+    for (const position of expiredPositions) {
+      const tokenId = position.tokenId;
+      const settlementPrice = assumeWin ? 1.0 : 0.0;
+      const settlementValue = position.shares * settlementPrice;
+      const costBasis = position.totalCost;
+      const pnl = settlementValue - costBasis;
+
+      logger.info("Force-settling expired position", {
+        market: position.marketSlug,
+        outcome: position.outcome,
+        shares: position.shares.toFixed(2),
+        assumeWin,
+        costBasis: costBasis.toFixed(2),
+        settlementValue: settlementValue.toFixed(2),
+        pnl: pnl.toFixed(2),
+      });
+
+      // Create trade record
+      const trade: PaperTrade = {
+        id: `paper-force-settle-${Date.now()}-${Math.random()
+          .toString(36)
+          .substr(2, 9)}`,
+        timestamp: Date.now(),
+        tokenId,
+        marketSlug: position.marketSlug,
+        outcome: position.outcome,
+        side: "SELL",
+        price: settlementPrice,
+        shares: position.shares,
+        usdValue: settlementValue,
+        fees: 0,
+        pnl,
+        targetWallet: "force-settle",
+        tradeId: `force-${tokenId.substring(0, 8)}`,
+      };
+      this.state.trades.push(trade);
+
+      // Update position
+      position.resolved = true;
+      position.settled = true;
+      position.settlementPrice = settlementPrice;
+      position.settlementPnl = pnl;
+      position.shares = 0;
+
+      // Update balance
+      this.state.currentBalance += settlementValue;
+
+      // Update stats
+      this.state.stats.totalRealizedPnl += pnl;
+      totalPnl += pnl;
+
+      if (pnl > 0) {
+        this.state.stats.winningTrades++;
+        this.state.stats.largestWin = Math.max(this.state.stats.largestWin, pnl);
+      } else if (pnl < 0) {
+        this.state.stats.losingTrades++;
+        this.state.stats.largestLoss = Math.min(
+          this.state.stats.largestLoss,
+          pnl
+        );
+      }
+
+      positionsSettled.push(position.marketSlug);
+    }
+
+    // Update win rate
+    const closedTrades =
+      this.state.stats.winningTrades + this.state.stats.losingTrades;
+    this.state.stats.winRate =
+      closedTrades > 0
+        ? (this.state.stats.winningTrades / closedTrades) * 100
+        : 0;
+
+    this.saveState();
+
+    return {
+      settled: positionsSettled.length,
+      totalPnl,
+      positionsSettled,
+    };
+  }
+
+  /**
    * Process a buy order
    */
   private processBuy(
@@ -379,40 +640,172 @@ export class PaperTradingManager {
   }
 
   /**
+   * Check if a market is expired based on its slug timestamp
+   * Slug format: "btc-updown-15m-1768032000" where the number is Unix timestamp
+   * Returns true if the timestamp is in the past
+   */
+  private isMarketExpired(slug: string): boolean {
+    // Try to extract timestamp from slug (e.g., "btc-updown-15m-1768032000")
+    const match = slug.match(/(\d{10})$/);
+    if (match) {
+      const marketTimestamp = parseInt(match[1], 10) * 1000; // Convert to milliseconds
+      const now = Date.now();
+      // Consider expired if more than 5 minutes past the timestamp
+      return now > marketTimestamp + 5 * 60 * 1000;
+    }
+    return false;
+  }
+
+  /**
+   * Get list of expired positions that can't be settled via API
+   */
+  getExpiredPositions(): PaperPosition[] {
+    return Object.values(this.state.positions).filter(
+      (p) => !p.settled && p.shares > 0 && this.isMarketExpired(p.marketSlug)
+    );
+  }
+
+  /**
    * Settle resolved positions - calculate final P&L based on market resolution
    * In Polymarket: winning shares pay $1.00, losing shares pay $0.00
+   *
+   * @param forceExpired - If true, force-settle positions marked as resolved but not found in API
+   *                       These are assumed to be losses since we can't verify the outcome
    */
-  async settleResolvedPositions(): Promise<{
+  async settleResolvedPositions(forceExpired: boolean = false): Promise<{
     settled: number;
     totalPnl: number;
     wins: number;
     losses: number;
+    forcedSettlements: number;
   }> {
     const gammaApi = getGammaApiClient();
     let settledCount = 0;
     let totalSettlementPnl = 0;
     let wins = 0;
     let losses = 0;
+    let forcedSettlements = 0;
 
     for (const [tokenId, position] of Object.entries(this.state.positions)) {
       // Skip if already settled or no shares
       if (position.settled || position.shares === 0) continue;
 
       try {
-        // Check if market is resolved
-        const resolution = await gammaApi.getMarketResolution(
+        // First try by slug
+        let resolution = await gammaApi.getMarketResolution(
           position.marketSlug
         );
 
+        // If not found by slug, try by token ID
         if (!resolution.resolved) {
-          continue; // Market not resolved yet
+          const tokenResolution = await gammaApi.getMarketResolutionByTokenId(
+            tokenId
+          );
+          if (tokenResolution.found && tokenResolution.resolved) {
+            resolution = tokenResolution;
+            logger.debug("Found resolution by token ID", {
+              tokenId,
+              slug: position.marketSlug,
+            });
+          }
+        }
+
+        if (!resolution.resolved) {
+          // Market not resolved yet OR not found in API
+          // Check if market is expired by timestamp - if forceExpired is true, settle all expired
+          const isExpiredByTime = this.isMarketExpired(position.marketSlug);
+          const shouldForceSettle = forceExpired && isExpiredByTime;
+          
+          if (shouldForceSettle) {
+            logger.info("Force-settling expired market position as loss", {
+              market: position.marketSlug,
+              tokenId: tokenId.substring(0, 16) + "...",
+              shares: position.shares,
+              cost: position.totalCost.toFixed(2),
+              isExpiredByTime,
+            });
+
+            // Assume complete loss (can't verify, so conservative approach)
+            const settlementValue = 0;
+            const costBasis = position.totalCost;
+            const pnl = settlementValue - costBasis;
+
+            // Create trade record for the settlement
+            const trade: PaperTrade = {
+              id: `paper-settle-${Date.now()}-${Math.random()
+                .toString(36)
+                .substr(2, 9)}`,
+              timestamp: Date.now(),
+              tokenId,
+              marketSlug: position.marketSlug,
+              outcome: position.outcome,
+              side: "SELL",
+              price: 0,
+              shares: position.shares,
+              usdValue: settlementValue,
+              fees: 0,
+              pnl,
+              targetWallet: "settlement",
+              tradeId: `forced-${tokenId.substring(0, 8)}`,
+            };
+            this.state.trades.push(trade);
+
+            position.settled = true;
+            position.settlementPrice = 0;
+            position.settlementPnl = pnl;
+
+            // Add settlement value to balance (0 in this case)
+            this.state.currentBalance += settlementValue;
+
+            // Update stats
+            this.state.stats.totalRealizedPnl += pnl;
+            losses++;
+            this.state.stats.losingTrades++;
+            if (pnl < this.state.stats.largestLoss) {
+              this.state.stats.largestLoss = pnl;
+            }
+
+            position.shares = 0;
+            settledCount++;
+            totalSettlementPnl += pnl;
+            forcedSettlements++;
+          }
+          continue;
         }
 
         // Determine if this position won or lost
-        // For a BUY position on YES: wins if YES won (outcome price = 1)
-        // For a BUY position on NO: wins if NO won (outcome price = 1)
-        const outcomeIndex = position.outcome === "YES" ? 0 : 1;
-        const settlementPrice = resolution.outcomePrices[outcomeIndex] ?? 0;
+        // Primary method: Match by winning token ID (most reliable)
+        // Fallback: Use outcome prices array (less reliable due to outcome name mismatches)
+        let settlementPrice = 0;
+        
+        if (resolution.winningTokenId) {
+          // Direct token ID match - most reliable
+          if (tokenId === resolution.winningTokenId) {
+            settlementPrice = 1.0; // Our token won
+            logger.debug("Position won - token ID match", {
+              tokenId: tokenId.substring(0, 16) + "...",
+              market: position.marketSlug,
+            });
+          } else {
+            settlementPrice = 0.0; // Our token lost
+            logger.debug("Position lost - token ID mismatch", {
+              ourToken: tokenId.substring(0, 16) + "...",
+              winningToken: resolution.winningTokenId.substring(0, 16) + "...",
+              market: position.marketSlug,
+            });
+          }
+        } else if (resolution.outcomePrices.length >= 2) {
+          // Fallback: Try to match by outcome name
+          // This is less reliable for non-standard markets (up/down, etc.)
+          const outcomeIndex = position.outcome === "YES" ? 0 : 1;
+          settlementPrice = resolution.outcomePrices[outcomeIndex] ?? 0;
+          logger.debug("Using outcome price fallback", {
+            outcome: position.outcome,
+            outcomeIndex,
+            settlementPrice,
+            allPrices: resolution.outcomePrices,
+          });
+        }
 
         // Calculate P&L
         // Settlement value = shares * settlement price ($1 if won, $0 if lost)
@@ -420,6 +813,44 @@ export class PaperTradingManager {
         const settlementValue = position.shares * settlementPrice;
         const costBasis = position.totalCost;
         const pnl = settlementValue - costBasis;
+
+        // Log resolution details for debugging
+        logger.info("Settling position with API resolution", {
+          market: position.marketSlug,
+          ourTokenId: tokenId.substring(0, 20) + "...",
+          winningTokenId: resolution.winningTokenId 
+            ? resolution.winningTokenId.substring(0, 20) + "..." 
+            : "unknown",
+          ourOutcome: position.outcome,
+          apiWinningOutcome: resolution.winningOutcome,
+          settlementPrice,
+          shares: position.shares,
+          costBasis: costBasis.toFixed(2),
+          settlementValue: settlementValue.toFixed(2),
+          pnl: pnl.toFixed(2),
+          isWin: settlementPrice >= 0.99,
+        });
+
+        // Create trade record for the settlement
+        const settledShares = position.shares;
+        const trade: PaperTrade = {
+          id: `paper-settle-${Date.now()}-${Math.random()
+            .toString(36)
+            .substr(2, 9)}`,
+          timestamp: Date.now(),
+          tokenId,
+          marketSlug: position.marketSlug,
+          outcome: position.outcome,
+          side: "SELL",
+          price: settlementPrice,
+          shares: settledShares,
+          usdValue: settlementValue,
+          fees: 0,
+          pnl,
+          targetWallet: "settlement",
+          tradeId: `resolved-${tokenId.substring(0, 8)}`,
+        };
+        this.state.trades.push(trade);
 
         // Update position
         position.resolved = true;
@@ -495,14 +926,21 @@ export class PaperTradingManager {
       totalPnl: totalSettlementPnl,
       wins,
       losses,
+      forcedSettlements,
     };
   }
 
   /**
    * Update position prices and unrealized PnL
    * Also checks for and settles resolved markets
+   * @returns Settlement info if any positions were settled
    */
-  async updatePrices(): Promise<void> {
+  async updatePrices(): Promise<{
+    settled: number;
+    totalPnl: number;
+    wins: number;
+    losses: number;
+  } | null> {
     let totalUnrealizedPnl = 0;
 
     // First, settle any resolved positions
@@ -578,6 +1016,17 @@ export class PaperTradingManager {
 
     this.state.stats.totalUnrealizedPnl = totalUnrealizedPnl;
     this.saveState();
+
+    // Return settlement info if any positions were settled
+    if (settlement.settled > 0) {
+      return {
+        settled: settlement.settled,
+        totalPnl: settlement.totalPnl,
+        wins: settlement.wins,
+        losses: settlement.losses,
+      };
+    }
+    return null;
   }
 
   /**
@@ -676,7 +1125,10 @@ export class PaperTradingManager {
       pad("OPEN POSITIONS"),
     ];
 
-    const positions = Object.values(state.positions);
+    // Only show non-settled positions with shares > 0
+    const positions = Object.values(state.positions).filter(
+      (p) => !p.settled && p.shares > 0
+    );
     if (positions.length === 0) {
       lines.push(pad("  No open positions"));
     } else {
@@ -755,6 +1207,13 @@ export class PaperTradingManager {
   }
 
   /**
+   * Get all positions
+   */
+  getPositions(): Record<string, PaperPosition> {
+    return this.state.positions;
+  }
+
+  /**
    * Get JSON stats for programmatic use
    */
   getStats(): PaperTradingStats & {
@@ -770,11 +1229,16 @@ export class PaperTradingManager {
         this.state.startingBalance) *
       100;
 
+    // Count only open (non-settled) positions with shares > 0
+    const openPositionCount = Object.values(this.state.positions).filter(
+      (p) => !p.settled && p.shares > 0
+    ).length;
+
     return {
       ...this.state.stats,
       currentBalance: this.state.currentBalance,
       startingBalance: this.state.startingBalance,
-      positionCount: Object.keys(this.state.positions).length,
+      positionCount: openPositionCount,
       totalReturn: returnPct,
     };
   }

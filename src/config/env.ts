@@ -15,6 +15,8 @@ export interface EnvConfig {
   polyApiKey?: string;
   polyApiSecret?: string;
   polyPassphrase?: string;
+  polyFunderAddress?: string; // Polymarket profile address (for Magic/Email login)
+  polySignatureType: number; // 0 = EOA, 1 = Magic/Email, 2 = Safe proxy
 
   // Network
   chainId: number;
@@ -41,6 +43,7 @@ export interface EnvConfig {
   defaultUsdSize: number;
   defaultSharesSize: number;
   proportionalMultiplier: number;
+  minOrderSize: number;
   slippage: number;
   maxUsdPerTrade: number;
   maxUsdPerMarket: number;
@@ -78,6 +81,8 @@ export function loadEnvConfig(): EnvConfig {
     polyApiKey: getEnvString("POLY_API_KEY") || undefined,
     polyApiSecret: getEnvString("POLY_API_SECRET") || undefined,
     polyPassphrase: getEnvString("POLY_PASSPHRASE") || undefined,
+    polyFunderAddress: getEnvString("POLY_FUNDER_ADDRESS") || undefined,
+    polySignatureType: getEnvNumber("POLY_SIGNATURE_TYPE", 0), // 0 = EOA by default
 
     // Network
     chainId: getEnvNumber("CHAIN_ID", 137),
@@ -101,12 +106,13 @@ export function loadEnvConfig(): EnvConfig {
     logToFile: getEnvBoolean("LOG_TO_FILE", true),
     logFile: getEnvString("LOG_FILE", "./data/logs/pmcopy.log"),
 
-    // Defaults
-    pollIntervalMs: getEnvNumber("POLL_INTERVAL_MS", 2500),
+    // Defaults - optimized for low latency
+    pollIntervalMs: getEnvNumber("POLL_INTERVAL_MS", 300), // Fast polling for quick copy
     sizingMode: getEnvString("SIZING_MODE", "fixed_usd"),
     defaultUsdSize: getEnvNumber("DEFAULT_USD_SIZE", 10),
     defaultSharesSize: getEnvNumber("DEFAULT_SHARES_SIZE", 10),
     proportionalMultiplier: getEnvNumber("PROPORTIONAL_MULTIPLIER", 0.25),
+    minOrderSize: getEnvNumber("MIN_ORDER_SIZE", 5),
     slippage: getEnvNumber("SLIPPAGE", 0.01),
     maxUsdPerTrade: getEnvNumber("MAX_USD_PER_TRADE", 100),
     maxUsdPerMarket: getEnvNumber("MAX_USD_PER_MARKET", 500),
@@ -167,9 +173,9 @@ export function validateEnvConfig(config: EnvConfig): {
   }
 
   // Validate numeric ranges
-  if (config.pollIntervalMs < 1000) {
+  if (config.pollIntervalMs < 100) {
     errors.push(
-      "POLL_INTERVAL_MS should be at least 1000ms to avoid rate limiting."
+      "POLL_INTERVAL_MS should be at least 100ms to avoid rate limiting."
     );
   }
   if (config.slippage < 0 || config.slippage > 0.5) {

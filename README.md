@@ -157,26 +157,45 @@ pmcopy init -t 0xabc... --max-usd-per-trade 50 --max-daily-volume 500
 
 ### `pmcopy run`
 
-Start the copy trading bot.
+Start the copy trading bot with a live dashboard UI.
 
 ```bash
 pmcopy run [options]
 
 Options:
   -i, --interval <ms>  Polling interval in milliseconds
-  -d, --dry-run       Enable dry-run mode
-  --no-dry-run        Disable dry-run mode
-  -v, --verbose       Enable verbose logging
+  -d, --dry-run        Enable dry-run mode
+  --no-dry-run         Disable dry-run mode
+  -v, --verbose        Enable verbose logging
+  --no-dashboard       Disable the live dashboard UI
 ```
+
+**Dashboard Features:**
+
+The live dashboard shows real-time stats including:
+
+- **Balance**: Current account balance with return percentage
+- **Positions Value**: Total value of open positions
+- **Open Positions**: Number of active positions
+- **Unrealized/Realized P&L**: Profit and loss tracking
+- **Total Trades**: Count of executed trades
+- **Win Rate**: Percentage of winning trades
+- **Activity Log**: Live feed of trades, skips, and errors
 
 **Examples:**
 
 ```bash
+# Run with live dashboard (default)
+pmcopy run
+
 # Run in dry-run mode (recommended for testing)
 pmcopy run --dry-run
 
 # Run with faster polling
-pmcopy run --interval 2000 --dry-run
+pmcopy run --interval 2000
+
+# Run without dashboard (verbose console output)
+pmcopy run --verbose
 
 # Live trading (use with caution!)
 pmcopy run --no-dry-run

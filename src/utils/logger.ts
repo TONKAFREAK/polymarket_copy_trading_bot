@@ -9,6 +9,21 @@ import { getEnvConfig } from "../config/env";
 
 const { combine, timestamp, printf, colorize, json } = winston.format;
 
+// Flag to indicate if dashboard is active (console should be silent)
+let dashboardMode = false;
+
+// Store original console methods to restore later
+const originalConsole = {
+  log: console.log.bind(console),
+  error: console.error.bind(console),
+  warn: console.warn.bind(console),
+  info: console.info.bind(console),
+  debug: console.debug.bind(console),
+};
+
+// Callback for intercepted console output (for dashboard)
+let consoleInterceptCallback: ((type: string, message: string) => void) | null = null;
+
 // Custom format for console output
 const consoleFormat = printf(
   ({ level, message, timestamp: ts, ...metadata }) => {
@@ -27,6 +42,80 @@ const consoleFormat = printf(
 );
 
 let loggerInstance: winston.Logger | null = null;
+let consoleTransport: winston.transports.ConsoleTransportInstance | null = null;
+
+/**
+ * Enable dashboard mode - silences console output and intercepts it
+ */
+export function enableDashboardMode(): void {
+  dashboardMode = true;
+  if (loggerInstance && consoleTransport) {
+    loggerInstance.remove(consoleTransport);
+  }
+  
+  // Intercept console methods to prevent library output from breaking dashboard
+  const interceptConsole = (type: string) => (...args: unknown[]) => {
+    // Convert args to string
+    const message = args.map(arg => 
+      typeof arg === 'string' ? arg : JSON.stringify(arg)
+    ).join(' ');
+    
+    // If we have a callback, send it there (for dashboard to display)
+    if (consoleInterceptCallback) {
+      consoleInterceptCallback(type, message);
+    }
+    
+    // Also log to file if available
+    if (loggerInstance) {
+      if (type === 'error') {
+        loggerInstance.error(message);
+      } else if (type === 'warn') {
+        loggerInstance.warn(message);
+      } else {
+        loggerInstance.debug(message);
+      }
+    }
+  };
+  
+  console.log = interceptConsole('log');
+  console.error = interceptConsole('error');
+  console.warn = interceptConsole('warn');
+  console.info = interceptConsole('info');
+  console.debug = interceptConsole('debug');
+}
+
+/**
+ * Disable dashboard mode - restores console output
+ */
+export function disableDashboardMode(): void {
+  dashboardMode = false;
+  if (loggerInstance && consoleTransport) {
+    loggerInstance.add(consoleTransport);
+  }
+  
+  // Restore original console methods
+  console.log = originalConsole.log;
+  console.error = originalConsole.error;
+  console.warn = originalConsole.warn;
+  console.info = originalConsole.info;
+  console.debug = originalConsole.debug;
+  
+  consoleInterceptCallback = null;
+}
+
+/**
+ * Set a callback to receive intercepted console output
+ */
+export function setConsoleInterceptCallback(callback: (type: string, message: string) => void): void {
+  consoleInterceptCallback = callback;
+}
+
+/**
+ * Check if dashboard mode is active
+ */
+export function isDashboardMode(): boolean {
+  return dashboardMode;
+}
 
 /**
  * Get or create the Winston logger instance
@@ -39,16 +128,18 @@ export function getLogger(): winston.Logger {
   const env = getEnvConfig();
   const transports: winston.transport[] = [];
 
-  // Console transport (always enabled)
-  transports.push(
-    new winston.transports.Console({
-      format: combine(
-        colorize(),
-        timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
-        consoleFormat
-      ),
-    })
-  );
+  // Console transport (can be removed in dashboard mode)
+  consoleTransport = new winston.transports.Console({
+    format: combine(
+      colorize(),
+      timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
+      consoleFormat
+    ),
+  });
+
+  if (!dashboardMode) {
+    transports.push(consoleTransport);
+  }
 
   // File transport (optional)
   if (env.logToFile) {

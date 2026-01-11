@@ -459,17 +459,11 @@ async function handleTradeDetected(
   let marketName = "";
 
   try {
-    // Try by token ID first (most reliable)
+    // Try by token ID first (most reliable) - uses clob_token_ids param
+    // This is the ONLY reliable way to get exact market match
+    // DO NOT use condition_id - it returns multiple markets and picks wrong one
     if (signal.tokenId && signal.tokenId.length > 20) {
       const market = await gammaApi.getMarketByTokenId(signal.tokenId);
-      if (market && market.question) {
-        marketName = market.question;
-      }
-    }
-
-    // Fallback to condition ID if token lookup failed
-    if (!marketName && signal.conditionId) {
-      const market = await gammaApi.getMarketByConditionId(signal.conditionId);
       if (market && market.question) {
         marketName = market.question;
       }
@@ -478,7 +472,7 @@ async function handleTradeDetected(
     // Silently use fallback
   }
 
-  // Final fallback to slug or token ID
+  // Final fallback to slug or token ID (don't use condition_id - it's unreliable)
   if (!marketName) {
     marketName =
       signal.marketSlug ||
@@ -524,8 +518,10 @@ async function handleTradeDetected(
         let openPositionsCount = 0;
         Object.values(positions).forEach((pos) => {
           if (!pos.settled && pos.shares > 0) {
-            positionsValue +=
-              (pos.currentPrice || pos.avgEntryPrice) * pos.shares;
+            // Calculate current value: currentPrice * shares (if available)
+            // This matches how positions are displayed in the dashboard
+            const currentPrice = pos.currentPrice ?? pos.avgEntryPrice;
+            positionsValue += currentPrice * pos.shares;
             openPositionsCount++;
           }
         });
@@ -576,8 +572,9 @@ async function handleTradeDetected(
           let openPositionsCount = 0;
           Object.values(positions).forEach((pos) => {
             if (!pos.settled && pos.shares > 0) {
-              positionsValue +=
-                (pos.currentPrice || pos.avgEntryPrice) * pos.shares;
+              // Calculate current value: currentPrice * shares (if available)
+              const currentPrice = pos.currentPrice ?? pos.avgEntryPrice;
+              positionsValue += currentPrice * pos.shares;
               openPositionsCount++;
             }
           });

@@ -38,8 +38,10 @@ interface AggregationBuffer {
   [key: string]: AggregatedTrade; // key = tokenId:side
 }
 
-// Aggregation window in milliseconds (5 seconds)
-const AGGREGATION_WINDOW_MS = 5000;
+// Aggregation window in milliseconds
+// IMPORTANT: Set to 0 to disable aggregation (emit trades individually)
+// Only use aggregation if target is known to make rapid micro-trades
+const AGGREGATION_WINDOW_MS = 0;
 
 export interface WatcherEvents {
   onTradeDetected: (signal: TradeSignal) => Promise<void>;

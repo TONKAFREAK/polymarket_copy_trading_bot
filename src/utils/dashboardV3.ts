@@ -748,14 +748,14 @@ export class DashboardV3 {
     const lastUpdateStr = this.formatTime(this.stats.lastUpdate);
     const feesStr =
       this.stats.totalFees > 0
-        ? `{red-fg}-$${this.stats.totalFees.toFixed(2)}{/}`
-        : "{gray-fg}$0.00{/}";
+        ? `{white-fg}-$${this.stats.totalFees.toFixed(2)}{/}`
+        : "{white-fg}$0.00  |  {/}";
 
     const content =
-      ` {gray-fg}Updated:{/} ${lastUpdateStr}  |  ` +
-      `{gray-fg}Fees:{/} ${feesStr}  |  ` +
-      `{cyan-fg}q{/} or {cyan-fg}Ctrl+C{/} to exit  |  ` +
-      `Scroll: {cyan-fg}Up/Down{/} or {cyan-fg}PgUp/PgDn{/}`;
+      `{white-fg}Updated: ${lastUpdateStr}  |  {/}` +
+      `{white-fg}Fees: ${feesStr}  |  {/}` +
+      `{white-fg}Press 'Q' or Ctrl+C to exit  |  {/}` +
+      `{white-fg}Scroll: Up/Down or PgUp/PgDn{/}`;
 
     // Only update if content changed (prevents flickering)
     if (content !== this.lastStatusBarContent) {
@@ -790,11 +790,11 @@ export class DashboardV3 {
         activityIcon = "{white-fg}    {/}";
     }
 
-    // Format market name
-    let market = entry.marketName || "Unknown";
-    // if (market.length > 25) {
-    //   market = market.substring(0, 22) + "...";
-    // }
+    // Format market name - use marketName field, fallback to question or Unknown
+    if (entry.activityType === "REDEEM" && entry.question) {
+      entry.marketName = entry.question;
+    }
+    let market = entry.marketName || entry.question || "Unknown";
 
     // Line 1: Target's action
     const targetShares = entry.targetShares?.toFixed(1) || "0.0";
@@ -804,7 +804,7 @@ export class DashboardV3 {
     let line1 = `{gray-fg}${time}{/} ${activityIcon} {yellow-fg}TARGET:{/} `;
     line1 += `${targetShares.padStart(
       5
-    )}@$${targetPrice}=$${targetTotal.padStart(5)}`;
+    )}@$${targetPrice} -- $${targetTotal.padStart(5)}`;
     line1 += ` {magenta-fg}${market}{/}`;
 
     this.logBox.log(line1);

@@ -43,7 +43,12 @@ export class ClobClientWrapper {
   // Cache market params for faster order placement
   private marketParamsCache: Map<
     string,
-    { tickSize: string; negRisk: boolean; timestamp: number }
+    {
+      tickSize: string;
+      negRisk: boolean;
+      feeRateBps: number;
+      timestamp: number;
+    }
   > = new Map();
   private readonly CACHE_TTL_MS = 60000; // 1 minute cache
 
@@ -193,49 +198,69 @@ export class ClobClientWrapper {
       // Get market parameters (with caching for speed)
       let tickSize = "0.01"; // Default
       let negRisk = false; // Default
+      let feeRateBps: number | undefined = undefined; // Let API use default if not fetched
 
       // Check cache first for faster order placement
       const cached = this.marketParamsCache.get(request.tokenId);
       if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
         tickSize = cached.tickSize;
         negRisk = cached.negRisk;
-        logger.debug("Using cached market params", { tickSize, negRisk });
+        feeRateBps = cached.feeRateBps;
+        logger.debug("Using cached market params", {
+          tickSize,
+          negRisk,
+          feeRateBps,
+        });
       } else {
         try {
-          // Fetch in parallel for speed
-          const [fetchedTickSize, fetchedNegRisk] = await Promise.all([
-            this.client.getTickSize(request.tokenId),
-            this.client.getNegRisk(request.tokenId),
-          ]);
+          // Fetch in parallel for speed (including fee rate from API)
+          const [fetchedTickSize, fetchedNegRisk, fetchedFeeRateBps] =
+            await Promise.all([
+              this.client.getTickSize(request.tokenId),
+              this.client.getNegRisk(request.tokenId),
+              this.client.getFeeRateBps(request.tokenId),
+            ]);
           tickSize = fetchedTickSize;
           negRisk = fetchedNegRisk;
+          feeRateBps = fetchedFeeRateBps;
           // Cache for future orders
           this.marketParamsCache.set(request.tokenId, {
             tickSize,
             negRisk,
+            feeRateBps,
             timestamp: Date.now(),
           });
+          logger.debug("Fetched and cached market params", {
+            tickSize,
+            negRisk,
+            feeRateBps,
+          });
         } catch (e) {
-          logger.debug("Using default market params", { tickSize, negRisk });
+          logger.debug("Using default market params (fee rate from API)", {
+            tickSize,
+            negRisk,
+          });
         }
       }
 
+      // Build order request - only include feeRateBps if we have it from API
+      const orderRequest: any = {
+        tokenID: request.tokenId,
+        side: request.side === "BUY" ? Side.BUY : Side.SELL,
+        price: request.price,
+        size: request.size,
+      };
+
+      // Only specify feeRateBps if we fetched it from API (valid value)
+      if (feeRateBps !== undefined) {
+        orderRequest.feeRateBps = feeRateBps;
+      }
+
       // Use createAndPostOrder for atomic order creation and posting
-      // This is the recommended method per Polymarket docs
-      // feeRateBps: minimal fee (1 bps = 0.01%) - 0 is invalid per API
-      const response = await this.client.createAndPostOrder(
-        {
-          tokenID: request.tokenId,
-          side: request.side === "BUY" ? Side.BUY : Side.SELL,
-          price: request.price,
-          size: request.size,
-          feeRateBps: 1, // Minimal fee (0.01%) to satisfy API requirement
-        },
-        {
-          tickSize,
-          negRisk,
-        }
-      );
+      const response = await this.client.createAndPostOrder(orderRequest, {
+        tickSize,
+        negRisk,
+      });
 
       // Log full response for debugging
       logger.debug("Order response received", {

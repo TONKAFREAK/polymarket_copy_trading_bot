@@ -226,30 +226,24 @@ export class Executor {
     size = Math.round(size * 100) / 100;
     usdValue = size * signal.price;
 
-    // Polymarket requires minimum 5 shares per order
-    const MIN_SHARES = 5;
-    if (size < MIN_SHARES) {
-      logger.debug("Order size below Polymarket minimum, adjusting", {
-        originalSize: size,
-        minRequired: MIN_SHARES,
-      });
-      size = MIN_SHARES;
-      usdValue = size * signal.price;
-    }
-
-    // Also enforce minimum USD value if configured
+    // Enforce minimum USD value if configured
     const minOrderSizeUsd = this.tradingConfig.minOrderSize || 0;
     if (minOrderSizeUsd > 0 && usdValue < minOrderSizeUsd && signal.price > 0) {
       // Calculate minimum shares needed to meet minimum order size
       size = Math.ceil((minOrderSizeUsd / signal.price) * 100) / 100;
-      // Ensure we still meet the 5 share minimum
-      size = Math.max(size, MIN_SHARES);
       usdValue = size * signal.price;
       logger.debug("Order size adjusted to meet minimum USD", {
         minOrderSizeUsd,
         adjustedSize: size,
         adjustedUsdValue: usdValue.toFixed(2),
       });
+    }
+
+    // Skip orders that are too small (less than 0.01 shares)
+    if (size < 0.01) {
+      logger.debug("Order size too small, will skip", { size });
+      size = 0;
+      usdValue = 0;
     }
 
     return { size, usdValue };
@@ -697,7 +691,8 @@ export class Executor {
   }
 
   /**
-   * Get current positions (aggregated from trade history)
+   * Get current positions from Polymarket Data API
+   * Uses the /positions endpoint which provides real-time values
    */
   async getPositions(): Promise<{
     positions: Array<{
@@ -715,15 +710,73 @@ export class Executor {
     totalValue: number;
     totalFees: number;
   }> {
-    if (!this.clobClient) {
-      return { positions: [], totalValue: 0, totalFees: 0 };
-    }
     try {
-      return await this.clobClient.getPositions();
-    } catch (error) {
-      logger.error("Failed to get positions", {
-        error: (error as Error).message,
+      // Import the Data API client
+      const { getDataApiClient } = await import("../polymarket/dataApi");
+      const { getEnvConfig } = await import("../config/env");
+      const env = getEnvConfig();
+
+      const dataApi = getDataApiClient();
+
+      // Use user's wallet address - first try env config, then CLOB client
+      let userWallet = env.polyFunderAddress;
+
+      if (!userWallet && this.clobClient) {
+        // Get wallet address from CLOB client
+        userWallet = this.clobClient.getWalletAddress();
+        logger.debug("Using wallet address from CLOB client", {
+          wallet: userWallet?.substring(0, 10) + "...",
+        });
+      }
+
+      if (!userWallet) {
+        logger.warn("No wallet address available for positions fetch");
+        return { positions: [], totalValue: 0, totalFees: 0 };
+      }
+
+      // Fetch positions from Data API
+      const apiPositions = await dataApi.fetchPositions(userWallet);
+
+      // Fetch total value
+      const totalValue = await dataApi.fetchTotalValue(userWallet);
+
+      // Convert to our position format
+      const positions = apiPositions.map((pos) => {
+        // Calculate fees paid: totalBought includes fees, so fees = totalBought - (size × avgPrice)
+        const costBasis = pos.size * pos.avgPrice;
+        const feesPaid = Math.max(0, pos.totalBought - costBasis);
+
+        return {
+          tokenId: pos.asset,
+          outcome: pos.outcome || "Yes",
+          shares: pos.size,
+          avgEntryPrice: pos.avgPrice,
+          currentValue: pos.currentValue,
+          market: pos.title || "Unknown",
+          conditionId: pos.conditionId,
+          isResolved: false, // Will check separately if needed
+          isRedeemable: pos.redeemable,
+          feesPaid, // Calculated from totalBought - (size × avgPrice)
+        };
       });
+
+      logger.debug("Fetched positions from Data API", {
+        count: positions.length,
+        totalValue,
+      });
+
+      return { positions, totalValue, totalFees: 0 };
+    } catch (error) {
+      logger.error(
+        "Failed to get positions from Data API, falling back to CLOB",
+        {
+          error: (error as Error).message,
+        }
+      );
+      // Fallback to CLOB client
+      if (this.clobClient) {
+        return await this.clobClient.getPositions();
+      }
       return { positions: [], totalValue: 0, totalFees: 0 };
     }
   }

@@ -647,7 +647,7 @@ export class DashboardV3 {
       `{cyan-fg}Cash Balance:{/}   ${fmtMoney(this.stats.balance)}`,
       `{cyan-fg}Positions:{/}      ${fmtMoney(
         this.stats.positionsValue
-      )} {white-fg}(${this.stats.openPositions}){/}`,
+      )} {white-fg}(${this.stats.openPositions ?? 0}){/}`,
       // `{cyan-fg}Portfolio:{/}      ${fmtMoney(portfolioValue)} ${colorPct(
       //   returnPct
       // )}`,
@@ -703,16 +703,34 @@ export class DashboardV3 {
         // Format shares and value
         const sharesStr = pos.shares.toFixed(1).padStart(6);
         const valueStr = `$${pos.currentValue.toFixed(2)}`.padStart(8);
-        const feeStr = `fee-$${(pos.feesPaid || 0).toFixed(2)}`;
+        const feesPaid = pos.feesPaid || 0;
+        const feeStr = feesPaid > 0 ? `fee - $${feesPaid.toFixed(2)}` : "";
 
-        // Line 1: Status, Side, Shares, Value
+        // Calculate P&L percentage for display
+        const costBasis = pos.shares * pos.avgEntryPrice;
+        const pnlPercent =
+          costBasis > 0
+            ? ((pos.currentValue - costBasis) / costBasis) * 100
+            : 0;
+        const pnlColor = pnlPercent >= 0 ? "green" : "red";
+        const pnlSign = pnlPercent >= 0 ? "+" : "";
+        const pnlStr = `{${pnlColor}-fg}${pnlSign}${pnlPercent.toFixed(1)}%{/}`;
+
+        // Line 1: Status, Side, Shares, Value, P&L%
+        let feesDisplay = "";
+        if (feeStr) {
+          feesDisplay = ` {white-fg}${feeStr}{/}`;
+        }
         targetLog.log(
-          `${statusIcon} {${sideColor}-fg}${sideStr}{/} ${sharesStr} ${valueStr} {white-fg}${feeStr}{/}`
+          `${statusIcon} {${sideColor}-fg}${sideStr}{/} ${sharesStr} ${valueStr} ${pnlStr}${feesDisplay}`
         );
 
         // Line 2: Market question (full name, wrapped if needed)
         const marketName = pos.market || "Unknown Market";
         targetLog.log(`  {white-fg}${marketName}{/}`);
+
+        // Line 3: Full Token ID
+        targetLog.log(`  {white-fg}ID: ${pos.tokenId}{/}`);
       }
 
       // Legend at bottom

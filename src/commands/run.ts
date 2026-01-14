@@ -9,6 +9,7 @@ import { getConfigManager } from "../config";
 import { getEnvConfig, validateEnvConfig, ensureDataDir } from "../config/env";
 import { getStateManager, StateManager } from "../copier/state";
 import { createWatcher } from "../copier/watcher";
+import { createWebSocketWatcher } from "../copier/websocketWatcher";
 import { createExecutor, Executor } from "../copier/executor";
 import { createRiskManager } from "../copier/risk";
 import { getPaperTradingManager } from "../copier/paperTrading";
@@ -27,6 +28,7 @@ import {
 } from "../utils/dashboardV3";
 import { Dashboard, getDashboard } from "../utils/dashboard";
 import { getGammaApiClient } from "../polymarket/gammaApi";
+import { autoRedeemSilent } from "./redeem";
 
 const logger = getLogger();
 
@@ -233,45 +235,395 @@ export function createRunCommand(): Command {
         // Track positions we've already attempted to redeem (to avoid spam)
         const redeemedTokenIds = new Set<string>();
 
+        // Track recently processed trades to prevent duplicates (WS + polling race)
+        const processedTrades = new Map<string, number>(); // tradeKey -> timestamp
+        const TRADE_DEDUP_WINDOW_MS = 30000; // 30 seconds dedup window
+
         // Helper to get active dashboard for logging
         const getActiveDashboard = () => dashboardV3 || dashboard;
 
-        // Watcher with event handlers
-        const watcher = createWatcher(config.targets, config.polling, {
-          onTradeDetected: async (signal: TradeSignal) => {
-            const result = await handleTradeDetected(
-              signal,
-              executor,
-              stateManager,
-              getActiveDashboard(),
-              paperTradingManager,
-              gammaApi
-            );
+        // Trade handler - shared by both WebSocket and polling watchers
+        const handleTrade = async (signal: TradeSignal) => {
+          // Create unique trade key for deduplication using tradeId (most reliable)
+          // or fallback to a composite key
+          const tradeKey =
+            signal.tradeId ||
+            `${signal.targetWallet}-${signal.tokenId}-${signal.side}-${signal.price}-${signal.timestamp}`;
+          const now = Date.now();
 
-            // Track session stats for live mode
-            if (result && !paperTradingManager) {
-              sessionTrades.count++;
-              if (result.success) {
-                sessionTrades.successCount++;
-                sessionTrades.totalValue += result.value;
+          // Check if we recently processed this exact trade
+          const lastProcessed = processedTrades.get(tradeKey);
+          if (lastProcessed && now - lastProcessed < TRADE_DEDUP_WINDOW_MS) {
+            // Already processed this trade recently, skip
+            logger.debug("Skipping duplicate trade detection", { tradeKey });
+            return;
+          }
+
+          // Mark this trade as processed
+          processedTrades.set(tradeKey, now);
+
+          // Clean up old entries to prevent memory leak
+          if (processedTrades.size > 100) {
+            for (const [key, time] of processedTrades) {
+              if (now - time > TRADE_DEDUP_WINDOW_MS) {
+                processedTrades.delete(key);
               }
             }
-          },
-          onError: (error: Error, context: string) => {
-            logError(logger, error, context);
-            stateManager.setLastError(error.message);
+          }
+
+          const result = await handleTradeDetected(
+            signal,
+            executor,
+            stateManager,
+            getActiveDashboard(),
+            paperTradingManager,
+            gammaApi
+          );
+
+          // Track session stats for live mode
+          if (result && !paperTradingManager) {
+            sessionTrades.count++;
+            if (result.success) {
+              sessionTrades.successCount++;
+              sessionTrades.totalValue += result.value;
+            }
+          }
+        };
+
+        const handleError = (error: Error, context: string) => {
+          logError(logger, error, context);
+          stateManager.setLastError(error.message);
+          const activeDashboard = getActiveDashboard();
+          if (activeDashboard) {
+            activeDashboard.logError(error.message, context);
+          }
+        };
+
+        // Auto-redeem timer - periodically checks for and redeems winning positions
+        let autoRedeemInterval: NodeJS.Timeout | null = null;
+
+        const startAutoRedeem = () => {
+          if (!env.autoRedeem || env.paperTrading || config.risk.dryRun) {
+            logger.debug("Auto-redeem disabled (off, paper trading, or dry-run mode)");
+            return;
+          }
+
+          const intervalMs = env.autoRedeemIntervalMs || 300000; // Default 5 minutes
+          logger.info(`Auto-redeem enabled, running every ${Math.round(intervalMs / 60000)} minutes`);
+
+          const runAutoRedeem = async () => {
+            try {
+              logger.debug("Running auto-redeem check...");
+              const result = await autoRedeemSilent();
+
+              if (result.redeemedCount > 0) {
+                const activeDashboard = getActiveDashboard();
+                if (activeDashboard) {
+                  activeDashboard.logInfo(
+                    `Auto-redeemed ${result.redeemedCount} position(s)`,
+                    `+$${result.totalUsdcGained.toFixed(2)} USDC`
+                  );
+                }
+                logger.info("Auto-redeem completed", {
+                  redeemed: result.redeemedCount,
+                  usdcGained: result.totalUsdcGained,
+                });
+              }
+
+              if (result.errors.length > 0) {
+                logger.debug("Auto-redeem had errors", { errors: result.errors });
+              }
+            } catch (error) {
+              logger.error("Auto-redeem error", { error: (error as Error).message });
+            }
+          };
+
+          // Run immediately, then on interval
+          runAutoRedeem();
+          autoRedeemInterval = setInterval(runAutoRedeem, intervalMs);
+        };
+
+        // Stop-loss timer - periodically checks for positions down by X% and sells them
+        let stopLossInterval: NodeJS.Timeout | null = null;
+        const stopLossSoldTokenIds = new Set<string>(); // Track sold positions to avoid re-selling
+
+        const startStopLoss = () => {
+          if (env.stopLossPercent <= 0 || env.paperTrading || config.risk.dryRun) {
+            logger.debug("Stop-loss disabled (off, paper trading, or dry-run mode)");
+            return;
+          }
+
+          const intervalMs = env.stopLossCheckIntervalMs || 30000; // Default 30 seconds
+          const threshold = env.stopLossPercent / 100; // Convert percentage to decimal
+          logger.info(`Stop-loss enabled at ${env.stopLossPercent}%, checking every ${Math.round(intervalMs / 1000)}s`);
+
+          const runStopLoss = async () => {
+            try {
+              // Import sell function
+              const { sellPositions } = await import("./sell");
+              
+              // Get current positions
+              const positionsData = await executor.getPositions();
+              
+              for (const pos of positionsData.positions) {
+                // Skip already sold or resolved positions
+                if (stopLossSoldTokenIds.has(pos.tokenId)) continue;
+                if (pos.isResolved || pos.isRedeemable) continue;
+                if (pos.shares <= 0.01) continue;
+                
+                // Calculate P&L percentage
+                const costBasis = pos.shares * pos.avgEntryPrice;
+                if (costBasis <= 0) continue;
+                
+                const pnlPercent = (pos.currentValue - costBasis) / costBasis;
+                
+                // Check if position is down by threshold (e.g., -80% = -0.8)
+                if (pnlPercent <= -threshold) {
+                  const activeDashboard = getActiveDashboard();
+                  const lossPercent = Math.abs(pnlPercent * 100).toFixed(1);
+                  
+                  if (activeDashboard) {
+                    activeDashboard.logInfo(
+                      `🛑 Stop-loss triggered (-${lossPercent}%)`,
+                      pos.market.substring(0, 40) + "..."
+                    );
+                  }
+                  
+                  logger.warn("Stop-loss triggered", {
+                    market: pos.market,
+                    tokenId: pos.tokenId,
+                    lossPercent: lossPercent + "%",
+                    costBasis: costBasis.toFixed(2),
+                    currentValue: pos.currentValue.toFixed(2),
+                  });
+                  
+                  // Mark as sold before attempting (prevent re-attempts)
+                  stopLossSoldTokenIds.add(pos.tokenId);
+                  
+                  try {
+                    // Sell the position
+                    const sellResults = await sellPositions({
+                      tokenId: pos.tokenId,
+                      slippage: 0.05, // 5% slippage for stop-loss (more aggressive)
+                      dryRun: false,
+                    });
+                    
+                    if (sellResults.length > 0 && sellResults[0].success) {
+                      const result = sellResults[0];
+                      if (activeDashboard) {
+                        activeDashboard.logInfo(
+                          `✅ Stop-loss sold: $${result.value.toFixed(2)}`,
+                          `${result.shares.toFixed(1)} @ $${result.price.toFixed(2)}`
+                        );
+                      }
+                      logger.info("Stop-loss position sold", {
+                        market: pos.market,
+                        shares: result.shares,
+                        price: result.price,
+                        value: result.value,
+                        orderId: result.orderId,
+                      });
+                    } else if (sellResults.length > 0) {
+                      const error = sellResults[0].error || "Unknown error";
+                      if (activeDashboard) {
+                        activeDashboard.logError(
+                          `Stop-loss sell failed`,
+                          error.substring(0, 50)
+                        );
+                      }
+                      logger.error("Stop-loss sell failed", { error, tokenId: pos.tokenId });
+                      // Remove from sold set so it can retry
+                      stopLossSoldTokenIds.delete(pos.tokenId);
+                    }
+                  } catch (sellError) {
+                    if (activeDashboard) {
+                      activeDashboard.logError(
+                        `Stop-loss error`,
+                        (sellError as Error).message.substring(0, 50)
+                      );
+                    }
+                    logger.error("Stop-loss sell error", { error: (sellError as Error).message });
+                    // Remove from sold set so it can retry
+                    stopLossSoldTokenIds.delete(pos.tokenId);
+                  }
+                }
+              }
+            } catch (error) {
+              logger.error("Stop-loss check error", { error: (error as Error).message });
+            }
+          };
+
+          // Run on interval (not immediately - let positions load first)
+          stopLossInterval = setInterval(runStopLoss, intervalMs);
+          // Run first check after 10 seconds
+          setTimeout(runStopLoss, 10000);
+        };
+
+        // Activity poller - polls for non-TRADE activities (REDEEM, SPLIT, MERGE)
+        // WebSocket only streams TRADEs, so we need this for other activity types
+        let activityPollerInterval: NodeJS.Timeout | null = null;
+        const seenActivityIds = new Set<string>();
+
+        const startActivityPoller = async () => {
+          const { getDataApiClient } = await import("../polymarket/dataApi");
+          const dataApi = getDataApiClient();
+
+          const pollActivities = async () => {
+            for (const target of config.targets) {
+              try {
+                const activities = await dataApi.fetchNonTradeActivities(
+                  target,
+                  20
+                );
+
+                for (const activity of activities) {
+                  const signal = dataApi.normalizeTrade(activity, target);
+
+                  // Skip if we've seen this activity
+                  if (seenActivityIds.has(signal.tradeId)) continue;
+
+                  // Skip old activities (more than 5 minutes old)
+                  const age = Date.now() - signal.timestamp;
+                  if (age > 5 * 60 * 1000) {
+                    seenActivityIds.add(signal.tradeId);
+                    continue;
+                  }
+
+                  seenActivityIds.add(signal.tradeId);
+
+                  // Also mark in state manager to prevent double processing
+                  const seen = await stateManager.hasSeenTrade(
+                    target,
+                    signal.tradeId
+                  );
+                  if (seen) continue;
+                  await stateManager.markTradeSeen(target, signal.tradeId);
+
+                  // Log the activity detection
+                  const activeDashboard = getActiveDashboard();
+                  if (activeDashboard) {
+                    activeDashboard.logInfo(
+                      `${signal.activityType} detected`,
+                      signal.marketSlug?.substring(0, 40) || "Unknown market"
+                    );
+                  }
+
+                  // Process it
+                  await handleTrade(signal);
+                }
+              } catch (error) {
+                // Silently ignore polling errors
+              }
+            }
+
+            // Clean up old seen IDs periodically (keep last 1000)
+            if (seenActivityIds.size > 1000) {
+              const arr = Array.from(seenActivityIds);
+              seenActivityIds.clear();
+              arr.slice(-500).forEach((id) => seenActivityIds.add(id));
+            }
+          };
+
+          // Poll every 30 seconds for non-trade activities
+          activityPollerInterval = setInterval(pollActivities, 30000);
+          // Run once immediately
+          pollActivities();
+        };
+
+        // Polling watcher - only used as fallback when WebSocket is disconnected
+        let pollingWatcher: ReturnType<typeof createWatcher> | null = null;
+        let pollingActive = false;
+
+        const startPollingFallback = async () => {
+          if (pollingActive || pollingWatcher) return;
+          pollingActive = true;
+
+          const pollingConfig = {
+            ...config.polling,
+            intervalMs: 2000, // Fast polling when it's the primary method
+          };
+          pollingWatcher = createWatcher(config.targets, pollingConfig, {
+            onTradeDetected: handleTrade,
+            onError: handleError,
+          });
+          await pollingWatcher.start();
+
+          const activeDashboard = getActiveDashboard();
+          if (activeDashboard) {
+            activeDashboard.logInfo(
+              "Polling fallback started",
+              "Using API polling while WebSocket reconnects"
+            );
+          }
+        };
+
+        const stopPollingFallback = async () => {
+          if (!pollingActive || !pollingWatcher) return;
+          pollingActive = false;
+
+          await pollingWatcher.stop();
+          pollingWatcher = null;
+        };
+
+        // Use WebSocket watcher for real-time trade detection (much faster!)
+        // Falls back to polling watcher if WebSocket fails
+        const wsWatcher = createWebSocketWatcher(config.targets, {
+          onTradeDetected: handleTrade,
+          onError: handleError,
+          onConnected: async () => {
             const activeDashboard = getActiveDashboard();
             if (activeDashboard) {
-              activeDashboard.logError(error.message, context);
+              activeDashboard.logInfo(
+                "WebSocket connected",
+                "Real-time trade detection active"
+              );
             }
+            // Stop polling when WebSocket is connected
+            await stopPollingFallback();
+          },
+          onDisconnected: async () => {
+            const activeDashboard = getActiveDashboard();
+            if (activeDashboard) {
+              activeDashboard.logError(
+                "WebSocket disconnected",
+                "Starting polling fallback..."
+              );
+            }
+            // Start polling when WebSocket disconnects
+            await startPollingFallback();
           },
         });
 
-        spinner.succeed("Components initialized");
+        spinner.succeed("Components initialized (WebSocket primary)");
 
-        // Start the watcher
+        // Start the WebSocket watcher
         stateManager.start();
-        await watcher.start();
+        await wsWatcher.start();
+
+        // Start activity poller for non-TRADE activities (REDEEM, SPLIT, MERGE)
+        // WebSocket only streams TRADEs, so we need this running always
+        await startActivityPoller();
+
+        // Start auto-redeem if enabled (live trading only)
+        startAutoRedeem();
+
+        // Start stop-loss monitoring if enabled (live trading only)
+        startStopLoss();
+
+        // Give WebSocket 5 seconds to connect, then start polling as fallback if needed
+        setTimeout(async () => {
+          const wsStatus = wsWatcher.getStatus();
+          if (!wsStatus.connected && !pollingActive) {
+            const activeDashboard = getActiveDashboard();
+            if (activeDashboard) {
+              activeDashboard.logInfo(
+                "WebSocket not ready",
+                "Starting polling fallback"
+              );
+            }
+            await startPollingFallback();
+          }
+        }, 5000);
 
         if (useDashboard && (dashboardV3 || dashboard)) {
           // Start the active dashboard
@@ -430,7 +782,7 @@ export function createRunCommand(): Command {
                   openOrdersCount: liveStats.openOrdersCount,
                   totalTrades: sessionTrades.count,
                   positionsValue,
-                  openPositions: openPositionsCount || undefined,
+                  openPositions: openPositionsCount,
                   totalFees,
                   winRate,
                 });
@@ -444,10 +796,14 @@ export function createRunCommand(): Command {
           const shutdown = async () => {
             clearInterval(priceUpdateInterval);
             clearInterval(statsRefresh);
+            if (activityPollerInterval) clearInterval(activityPollerInterval);
+            if (autoRedeemInterval) clearInterval(autoRedeemInterval);
+            if (stopLossInterval) clearInterval(stopLossInterval);
             activeDashboard.stop();
             disableDashboardMode(); // Re-enable console logging
             console.log(chalk.yellow("\n\nShutting down..."));
-            await watcher.stop();
+            await wsWatcher.stop();
+            if (pollingWatcher) await pollingWatcher.stop();
             stateManager.stop();
             await stateManager.close();
             console.log(chalk.green("Goodbye! 👋\n"));
@@ -481,7 +837,11 @@ export function createRunCommand(): Command {
           // Handle graceful shutdown
           const shutdown = async () => {
             console.log(chalk.yellow("\n\nShutting down..."));
-            await watcher.stop();
+            await wsWatcher.stop();
+            if (pollingWatcher) await pollingWatcher.stop();
+            if (activityPollerInterval) clearInterval(activityPollerInterval);
+            if (autoRedeemInterval) clearInterval(autoRedeemInterval);
+            if (stopLossInterval) clearInterval(stopLossInterval);
             stateManager.stop();
             await stateManager.close();
             console.log(chalk.green("Goodbye! 👋\n"));

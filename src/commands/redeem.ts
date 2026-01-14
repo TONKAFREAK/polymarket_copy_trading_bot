@@ -571,3 +571,141 @@ export async function redeemByTokenId(tokenId: string): Promise<{
     };
   }
 }
+
+/**
+ * Silent auto-redeem function for background execution
+ * Returns summary of redemptions without console output
+ */
+export async function autoRedeemSilent(): Promise<{
+  success: boolean;
+  redeemedCount: number;
+  totalUsdcGained: number;
+  errors: string[];
+}> {
+  const env = getEnvConfig();
+  const result = {
+    success: false,
+    redeemedCount: 0,
+    totalUsdcGained: 0,
+    errors: [] as string[],
+  };
+
+  try {
+    // Setup wallet
+    const provider = new ethers.providers.JsonRpcProvider(env.rpcUrl);
+    const pk = env.privateKey.startsWith("0x")
+      ? env.privateKey
+      : `0x${env.privateKey}`;
+    const wallet = new ethers.Wallet(pk, provider);
+
+    // Check MATIC balance for gas
+    const maticBalance = await wallet.getBalance();
+    if (maticBalance.lt(ethers.utils.parseEther("0.005"))) {
+      result.errors.push("Insufficient MATIC for gas");
+      return result;
+    }
+
+    // Initialize CLOB client to fetch positions
+    const clobClient = new ClobClientWrapper({
+      privateKey: env.privateKey,
+      chainId: 137,
+    });
+    await clobClient.initialize();
+
+    // Get positions
+    const { positions } = await clobClient.getPositions();
+    if (positions.length === 0) {
+      result.success = true; // No positions to redeem is not an error
+      return result;
+    }
+
+    // Get Gamma API for market names and resolution status
+    const gammaApi = getGammaApiClient();
+    const ctf = new ethers.Contract(
+      POLYGON_CONTRACTS.conditionalTokens,
+      CTF_ABI,
+      wallet
+    );
+
+    // Find redeemable positions
+    const redeemablePositions: Array<{
+      tokenId: string;
+      conditionId: string;
+      shares: number;
+      outcome: string;
+      marketName: string;
+    }> = [];
+
+    for (const pos of positions) {
+      try {
+        const market = await gammaApi.getMarketByTokenId(pos.tokenId);
+        if (!market) continue;
+
+        const conditionId = market.conditionId ? String(market.conditionId) : null;
+        if (!conditionId || !conditionId.startsWith("0x") || conditionId.length !== 66) {
+          continue;
+        }
+
+        const resolution = await checkConditionResolution(ctf, conditionId);
+        if (resolution.isResolved) {
+          redeemablePositions.push({
+            tokenId: pos.tokenId,
+            conditionId,
+            shares: pos.shares,
+            outcome: pos.outcome,
+            marketName: String(market.question || market.title || "Unknown"),
+          });
+        }
+      } catch {
+        // Skip positions we can't check
+      }
+    }
+
+    if (redeemablePositions.length === 0) {
+      result.success = true;
+      return result;
+    }
+
+    // Get gas settings
+    const feeData = await provider.getFeeData();
+    const baseGasPrice = feeData.gasPrice || ethers.utils.parseUnits("50", "gwei");
+    const gasPrice = baseGasPrice.mul(120).div(100);
+    const gasSettings = { gasPrice, gasLimit: 200_000 };
+
+    // Get USDC balance before
+    const usdc = new ethers.Contract(POLYGON_CONTRACTS.collateral, ERC20_ABI, provider);
+    const usdcBefore = await usdc.balanceOf(wallet.address);
+
+    // Redeem each position
+    for (const pos of redeemablePositions) {
+      try {
+        const redeemResult = await redeemPosition(wallet, ctf, pos.conditionId, gasSettings);
+        if (redeemResult.success) {
+          result.redeemedCount++;
+          logger.info("Auto-redeemed position", {
+            market: pos.marketName.substring(0, 50),
+            outcome: pos.outcome,
+            txHash: redeemResult.txHash,
+          });
+        } else if (redeemResult.error) {
+          result.errors.push(`${pos.marketName.substring(0, 30)}: ${redeemResult.error}`);
+        }
+      } catch (err) {
+        result.errors.push(`${pos.marketName.substring(0, 30)}: ${(err as Error).message}`);
+      }
+    }
+
+    // Calculate USDC gained
+    const usdcAfter = await usdc.balanceOf(wallet.address);
+    result.totalUsdcGained = parseFloat(
+      ethers.utils.formatUnits(usdcAfter.sub(usdcBefore), 6)
+    );
+
+    result.success = true;
+    return result;
+  } catch (error) {
+    logger.error("Auto-redeem failed", { error: (error as Error).message });
+    result.errors.push((error as Error).message);
+    return result;
+  }
+}

@@ -28,6 +28,7 @@ import {
 } from "./commands";
 import { createRedeemCommand } from "./commands/redeemCmd";
 import { createDiagnoseCommand } from "./commands/diagnose";
+import { createSellCommand } from "./commands/sell";
 
 // ASCII Banner
 const banner = `
@@ -78,6 +79,7 @@ program.addCommand(createPaperCommand());
 program.addCommand(createApproveCommand());
 program.addCommand(createRedeemCommand());
 program.addCommand(createDiagnoseCommand());
+program.addCommand(createSellCommand());
 
 // Default action (no command)
 program.action(() => {

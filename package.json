@@ -26,6 +26,7 @@
   "dependencies": {
     "@polymarket/builder-signing-sdk": "^0.0.8",
     "@polymarket/clob-client": "^4.4.0",
+    "@polymarket/real-time-data-client": "^1.4.0",
     "@types/blessed": "^0.1.27",
     "axios": "^1.6.7",
     "blessed": "^0.1.81",

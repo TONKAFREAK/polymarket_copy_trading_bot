@@ -130,6 +130,64 @@ export class DataApiClient {
   }
 
   /**
+   * Fetch only non-TRADE activities (REDEEM, SPLIT, MERGE)
+   * WebSocket only streams TRADEs, so we need polling for other activity types
+   */
+  async fetchNonTradeActivities(
+    walletAddress: string,
+    limit?: number
+  ): Promise<DataApiTrade[]> {
+    const activityLimit = limit || 20;
+
+    try {
+      const response = await fetchWithRetry<DataApiTrade[]>(
+        this.client,
+        {
+          method: "GET",
+          url: "/activity",
+          params: {
+            user: walletAddress,
+            limit: activityLimit,
+            sortBy: "TIMESTAMP",
+            sortDirection: "DESC",
+          },
+        },
+        {
+          maxRetries: this.config.maxRetries,
+          baseDelayMs: this.config.baseBackoffMs,
+        }
+      );
+
+      // Filter to only non-TRADE copyable activity types (REDEEM, SPLIT, MERGE)
+      const nonTradeActivities = (response || []).filter((item) => {
+        const actType = item.type?.toUpperCase() || "TRADE";
+
+        // Skip TRADE - we get those via WebSocket
+        if (actType === "TRADE") return false;
+
+        // Include REDEEM, SPLIT, MERGE
+        return COPYABLE_ACTIVITY_TYPES.has(actType);
+      });
+
+      if (nonTradeActivities.length > 0) {
+        logger.debug(
+          `Found ${
+            nonTradeActivities.length
+          } non-trade activities for ${walletAddress.substring(0, 10)}...`
+        );
+      }
+
+      return nonTradeActivities;
+    } catch (error) {
+      logger.error("Failed to fetch non-trade activities", {
+        wallet: walletAddress,
+        error: (error as Error).message,
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Fetch activity for a wallet address (alternative endpoint)
    * Uses the /activity endpoint
    */
@@ -288,6 +346,129 @@ export class DataApiClient {
     }
     return undefined;
   }
+
+  /**
+   * Fetch user positions from the Data API /positions endpoint
+   * Returns real-time positions with current value and P&L
+   */
+  async fetchPositions(walletAddress: string): Promise<DataApiPosition[]> {
+    try {
+      logger.debug(
+        `Fetching positions for wallet: ${walletAddress.substring(0, 10)}...`
+      );
+
+      const response = await fetchWithRetry<
+        DataApiPosition[] | { history: DataApiPosition[] }
+      >(
+        this.client,
+        {
+          method: "GET",
+          url: "/positions",
+          params: {
+            user: walletAddress,
+            sizeThreshold: 0.01,
+            limit: 100,
+            sortBy: "CURRENT",
+            sortDirection: "DESC",
+          },
+        },
+        {
+          maxRetries: this.config.maxRetries,
+          baseDelayMs: this.config.baseBackoffMs,
+        }
+      );
+
+      // Handle both array and wrapped response formats
+      let positions: DataApiPosition[];
+      if (Array.isArray(response)) {
+        positions = response;
+      } else if (
+        response &&
+        typeof response === "object" &&
+        "history" in response
+      ) {
+        positions = response.history || [];
+      } else {
+        logger.warn("Unexpected positions response format", {
+          type: typeof response,
+          keys: response ? Object.keys(response) : [],
+        });
+        positions = [];
+      }
+
+      logger.debug(`Fetched ${positions.length} positions from Data API`);
+
+      return positions;
+    } catch (error) {
+      logger.error("Failed to fetch positions from Data API", {
+        wallet: walletAddress,
+        error: (error as Error).message,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch total value of user's positions
+   */
+  async fetchTotalValue(walletAddress: string): Promise<number> {
+    try {
+      const response = await fetchWithRetry<
+        Array<{ user: string; value: number }>
+      >(
+        this.client,
+        {
+          method: "GET",
+          url: "/value",
+          params: {
+            user: walletAddress,
+          },
+        },
+        {
+          maxRetries: this.config.maxRetries,
+          baseDelayMs: this.config.baseBackoffMs,
+        }
+      );
+
+      if (response && response.length > 0) {
+        return response[0].value || 0;
+      }
+      return 0;
+    } catch (error) {
+      logger.error("Failed to fetch total value from Data API", {
+        wallet: walletAddress,
+        error: (error as Error).message,
+      });
+      return 0;
+    }
+  }
+}
+
+/**
+ * Position data from the Data API /positions endpoint
+ */
+export interface DataApiPosition {
+  proxyWallet: string;
+  asset: string;
+  conditionId: string;
+  size: number;
+  avgPrice: number;
+  initialValue: number;
+  currentValue: number;
+  cashPnl: number;
+  percentPnl: number;
+  totalBought: number;
+  realizedPnl: number;
+  percentRealizedPnl: number;
+  curPrice: number;
+  redeemable: boolean;
+  mergeable: boolean;
+  title: string;
+  slug: string;
+  icon?: string;
+  eventSlug?: string;
+  outcome: string;
+  outcomeIndex: number;
 }
 
 // Singleton instance

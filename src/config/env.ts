@@ -54,6 +54,14 @@ export interface EnvConfig {
   paperTrading: boolean;
   paperStartingBalance: number;
   paperFeeRate: number;
+
+  // Auto-redeem
+  autoRedeem: boolean;
+  autoRedeemIntervalMs: number;
+
+  // Stop-loss: auto-sell positions down by this percentage (0 = disabled)
+  stopLossPercent: number;
+  stopLossCheckIntervalMs: number;
 }
 
 function getEnvString(key: string, defaultValue: string = ""): string {
@@ -108,21 +116,29 @@ export function loadEnvConfig(): EnvConfig {
 
     // Defaults - optimized for low latency
     pollIntervalMs: getEnvNumber("POLL_INTERVAL_MS", 300), // Fast polling for quick copy
-    sizingMode: getEnvString("SIZING_MODE", "fixed_usd"),
+    sizingMode: getEnvString("SIZING_MODE", "proportional"),
     defaultUsdSize: getEnvNumber("DEFAULT_USD_SIZE", 10),
     defaultSharesSize: getEnvNumber("DEFAULT_SHARES_SIZE", 10),
-    proportionalMultiplier: getEnvNumber("PROPORTIONAL_MULTIPLIER", 0.25),
-    minOrderSize: getEnvNumber("MIN_ORDER_SIZE", 5),
+    proportionalMultiplier: getEnvNumber("PROPORTIONAL_MULTIPLIER", 0.01),
+    minOrderSize: getEnvNumber("MIN_ORDER_SIZE", 0.01),
     slippage: getEnvNumber("SLIPPAGE", 0.01),
     maxUsdPerTrade: getEnvNumber("MAX_USD_PER_TRADE", 100),
     maxUsdPerMarket: getEnvNumber("MAX_USD_PER_MARKET", 500),
     maxDailyUsdVolume: getEnvNumber("MAX_DAILY_USD_VOLUME", 1000),
-    dryRun: getEnvBoolean("DRY_RUN", true),
+    dryRun: getEnvBoolean("DRY_RUN", false),
 
     // Paper trading
     paperTrading: getEnvBoolean("PAPER_TRADING", true),
     paperStartingBalance: getEnvNumber("PAPER_STARTING_BALANCE", 1000),
     paperFeeRate: getEnvNumber("PAPER_FEE_RATE", 0.001),
+
+    // Auto-redeem: automatically redeem winning positions periodically
+    autoRedeem: getEnvBoolean("AUTO_REDEEM", false),
+    autoRedeemIntervalMs: getEnvNumber("AUTO_REDEEM_INTERVAL_MS", 300000), // 5 minutes default
+
+    // Stop-loss: auto-sell positions down by this percentage (0 = disabled, 80 = sell at 80% loss)
+    stopLossPercent: getEnvNumber("STOP_LOSS_PERCENT", 0), // 0 = disabled by default
+    stopLossCheckIntervalMs: getEnvNumber("STOP_LOSS_CHECK_INTERVAL_MS", 30000), // 30 seconds
   };
 }
 

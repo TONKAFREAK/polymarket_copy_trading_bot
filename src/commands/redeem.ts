@@ -641,8 +641,14 @@ export async function autoRedeemSilent(): Promise<{
         const market = await gammaApi.getMarketByTokenId(pos.tokenId);
         if (!market) continue;
 
-        const conditionId = market.conditionId ? String(market.conditionId) : null;
-        if (!conditionId || !conditionId.startsWith("0x") || conditionId.length !== 66) {
+        const conditionId = market.conditionId
+          ? String(market.conditionId)
+          : null;
+        if (
+          !conditionId ||
+          !conditionId.startsWith("0x") ||
+          conditionId.length !== 66
+        ) {
           continue;
         }
 
@@ -668,18 +674,28 @@ export async function autoRedeemSilent(): Promise<{
 
     // Get gas settings
     const feeData = await provider.getFeeData();
-    const baseGasPrice = feeData.gasPrice || ethers.utils.parseUnits("50", "gwei");
+    const baseGasPrice =
+      feeData.gasPrice || ethers.utils.parseUnits("50", "gwei");
     const gasPrice = baseGasPrice.mul(120).div(100);
     const gasSettings = { gasPrice, gasLimit: 200_000 };
 
     // Get USDC balance before
-    const usdc = new ethers.Contract(POLYGON_CONTRACTS.collateral, ERC20_ABI, provider);
+    const usdc = new ethers.Contract(
+      POLYGON_CONTRACTS.collateral,
+      ERC20_ABI,
+      provider
+    );
     const usdcBefore = await usdc.balanceOf(wallet.address);
 
     // Redeem each position
     for (const pos of redeemablePositions) {
       try {
-        const redeemResult = await redeemPosition(wallet, ctf, pos.conditionId, gasSettings);
+        const redeemResult = await redeemPosition(
+          wallet,
+          ctf,
+          pos.conditionId,
+          gasSettings
+        );
         if (redeemResult.success) {
           result.redeemedCount++;
           logger.info("Auto-redeemed position", {
@@ -688,10 +704,14 @@ export async function autoRedeemSilent(): Promise<{
             txHash: redeemResult.txHash,
           });
         } else if (redeemResult.error) {
-          result.errors.push(`${pos.marketName.substring(0, 30)}: ${redeemResult.error}`);
+          result.errors.push(
+            `${pos.marketName.substring(0, 30)}: ${redeemResult.error}`
+          );
         }
       } catch (err) {
-        result.errors.push(`${pos.marketName.substring(0, 30)}: ${(err as Error).message}`);
+        result.errors.push(
+          `${pos.marketName.substring(0, 30)}: ${(err as Error).message}`
+        );
       }
     }
 

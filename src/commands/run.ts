@@ -304,12 +304,18 @@ export function createRunCommand(): Command {
 
         const startAutoRedeem = () => {
           if (!env.autoRedeem || env.paperTrading || config.risk.dryRun) {
-            logger.debug("Auto-redeem disabled (off, paper trading, or dry-run mode)");
+            logger.debug(
+              "Auto-redeem disabled (off, paper trading, or dry-run mode)"
+            );
             return;
           }
 
           const intervalMs = env.autoRedeemIntervalMs || 300000; // Default 5 minutes
-          logger.info(`Auto-redeem enabled, running every ${Math.round(intervalMs / 60000)} minutes`);
+          logger.info(
+            `Auto-redeem enabled, running every ${Math.round(
+              intervalMs / 60000
+            )} minutes`
+          );
 
           const runAutoRedeem = async () => {
             try {
@@ -331,10 +337,14 @@ export function createRunCommand(): Command {
               }
 
               if (result.errors.length > 0) {
-                logger.debug("Auto-redeem had errors", { errors: result.errors });
+                logger.debug("Auto-redeem had errors", {
+                  errors: result.errors,
+                });
               }
             } catch (error) {
-              logger.error("Auto-redeem error", { error: (error as Error).message });
+              logger.error("Auto-redeem error", {
+                error: (error as Error).message,
+              });
             }
           };
 
@@ -348,47 +358,57 @@ export function createRunCommand(): Command {
         const stopLossSoldTokenIds = new Set<string>(); // Track sold positions to avoid re-selling
 
         const startStopLoss = () => {
-          if (env.stopLossPercent <= 0 || env.paperTrading || config.risk.dryRun) {
-            logger.debug("Stop-loss disabled (off, paper trading, or dry-run mode)");
+          if (
+            env.stopLossPercent <= 0 ||
+            env.paperTrading ||
+            config.risk.dryRun
+          ) {
+            logger.debug(
+              "Stop-loss disabled (off, paper trading, or dry-run mode)"
+            );
             return;
           }
 
           const intervalMs = env.stopLossCheckIntervalMs || 30000; // Default 30 seconds
           const threshold = env.stopLossPercent / 100; // Convert percentage to decimal
-          logger.info(`Stop-loss enabled at ${env.stopLossPercent}%, checking every ${Math.round(intervalMs / 1000)}s`);
+          logger.info(
+            `Stop-loss enabled at ${
+              env.stopLossPercent
+            }%, checking every ${Math.round(intervalMs / 1000)}s`
+          );
 
           const runStopLoss = async () => {
             try {
               // Import sell function
               const { sellPositions } = await import("./sell");
-              
+
               // Get current positions
               const positionsData = await executor.getPositions();
-              
+
               for (const pos of positionsData.positions) {
                 // Skip already sold or resolved positions
                 if (stopLossSoldTokenIds.has(pos.tokenId)) continue;
                 if (pos.isResolved || pos.isRedeemable) continue;
                 if (pos.shares <= 0.01) continue;
-                
+
                 // Calculate P&L percentage
                 const costBasis = pos.shares * pos.avgEntryPrice;
                 if (costBasis <= 0) continue;
-                
+
                 const pnlPercent = (pos.currentValue - costBasis) / costBasis;
-                
+
                 // Check if position is down by threshold (e.g., -80% = -0.8)
                 if (pnlPercent <= -threshold) {
                   const activeDashboard = getActiveDashboard();
                   const lossPercent = Math.abs(pnlPercent * 100).toFixed(1);
-                  
+
                   if (activeDashboard) {
                     activeDashboard.logInfo(
                       `🛑 Stop-loss triggered (-${lossPercent}%)`,
                       pos.market.substring(0, 40) + "..."
                     );
                   }
-                  
+
                   logger.warn("Stop-loss triggered", {
                     market: pos.market,
                     tokenId: pos.tokenId,
@@ -396,10 +416,10 @@ export function createRunCommand(): Command {
                     costBasis: costBasis.toFixed(2),
                     currentValue: pos.currentValue.toFixed(2),
                   });
-                  
+
                   // Mark as sold before attempting (prevent re-attempts)
                   stopLossSoldTokenIds.add(pos.tokenId);
-                  
+
                   try {
                     // Sell the position
                     const sellResults = await sellPositions({
@@ -407,13 +427,15 @@ export function createRunCommand(): Command {
                       slippage: 0.05, // 5% slippage for stop-loss (more aggressive)
                       dryRun: false,
                     });
-                    
+
                     if (sellResults.length > 0 && sellResults[0].success) {
                       const result = sellResults[0];
                       if (activeDashboard) {
                         activeDashboard.logInfo(
                           `✅ Stop-loss sold: $${result.value.toFixed(2)}`,
-                          `${result.shares.toFixed(1)} @ $${result.price.toFixed(2)}`
+                          `${result.shares.toFixed(
+                            1
+                          )} @ $${result.price.toFixed(2)}`
                         );
                       }
                       logger.info("Stop-loss position sold", {
@@ -431,7 +453,10 @@ export function createRunCommand(): Command {
                           error.substring(0, 50)
                         );
                       }
-                      logger.error("Stop-loss sell failed", { error, tokenId: pos.tokenId });
+                      logger.error("Stop-loss sell failed", {
+                        error,
+                        tokenId: pos.tokenId,
+                      });
                       // Remove from sold set so it can retry
                       stopLossSoldTokenIds.delete(pos.tokenId);
                     }
@@ -442,14 +467,18 @@ export function createRunCommand(): Command {
                         (sellError as Error).message.substring(0, 50)
                       );
                     }
-                    logger.error("Stop-loss sell error", { error: (sellError as Error).message });
+                    logger.error("Stop-loss sell error", {
+                      error: (sellError as Error).message,
+                    });
                     // Remove from sold set so it can retry
                     stopLossSoldTokenIds.delete(pos.tokenId);
                   }
                 }
               }
             } catch (error) {
-              logger.error("Stop-loss check error", { error: (error as Error).message });
+              logger.error("Stop-loss check error", {
+                error: (error as Error).message,
+              });
             }
           };
 

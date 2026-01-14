@@ -282,7 +282,10 @@ export class ClobClientWrapper {
 
       // Handle successful order - either has orderID or transactionsHashes
       const txHashes = resp?.transactionsHashes;
-      if (resp && (resp.orderID || (Array.isArray(txHashes) && txHashes.length > 0))) {
+      if (
+        resp &&
+        (resp.orderID || (Array.isArray(txHashes) && txHashes.length > 0))
+      ) {
         const orderId = resp.orderID || txHashes?.[0] || `order-${Date.now()}`;
         logger.info("Order placed successfully", {
           orderId,
@@ -302,29 +305,36 @@ export class ClobClientWrapper {
       } else {
         // Extract error message from response - handle various formats
         let errorMsg = "No order ID returned";
-        
+
         // Try various error fields
         if (resp?.errorMsg) {
           errorMsg = resp.errorMsg;
         } else if (resp?.error) {
-          errorMsg = typeof resp.error === 'string' ? resp.error : JSON.stringify(resp.error);
+          errorMsg =
+            typeof resp.error === "string"
+              ? resp.error
+              : JSON.stringify(resp.error);
         } else if (resp?.message) {
           errorMsg = resp.message;
-        } else if (resp?.status && resp.status !== 'open' && resp.status !== 'matched') {
+        } else if (
+          resp?.status &&
+          resp.status !== "open" &&
+          resp.status !== "matched"
+        ) {
           // The status field itself might describe the issue
           errorMsg = `Order status: ${resp.status}`;
         }
-        
+
         // Clean up error message - remove HTML if present (rate limit/Cloudflare pages)
-        if (errorMsg.includes('<!DOCTYPE') || errorMsg.includes('<html')) {
+        if (errorMsg.includes("<!DOCTYPE") || errorMsg.includes("<html")) {
           errorMsg = "API rate limited or blocked";
         }
-        
+
         // Truncate very long error messages
         if (errorMsg.length > 100) {
           errorMsg = errorMsg.substring(0, 97) + "...";
         }
-        
+
         logger.warn("Order submission issue", {
           response: JSON.stringify(resp),
           errorMsg,
@@ -336,21 +346,27 @@ export class ClobClientWrapper {
       }
     } catch (error) {
       let errorMessage = (error as Error).message;
-      
+
       // Clean up common error messages
-      if (errorMessage.includes('<!DOCTYPE') || errorMessage.includes('<html')) {
+      if (
+        errorMessage.includes("<!DOCTYPE") ||
+        errorMessage.includes("<html")
+      ) {
         errorMessage = "API rate limited or blocked";
-      } else if (errorMessage.includes('ECONNRESET') || errorMessage.includes('ETIMEDOUT')) {
+      } else if (
+        errorMessage.includes("ECONNRESET") ||
+        errorMessage.includes("ETIMEDOUT")
+      ) {
         errorMessage = "Connection error - network issue";
-      } else if (errorMessage.includes('socket hang up')) {
+      } else if (errorMessage.includes("socket hang up")) {
         errorMessage = "Connection dropped";
       }
-      
+
       // Truncate if too long
       if (errorMessage.length > 100) {
         errorMessage = errorMessage.substring(0, 97) + "...";
       }
-      
+
       logger.error("Failed to place order", {
         error: errorMessage,
         tokenId: request.tokenId,

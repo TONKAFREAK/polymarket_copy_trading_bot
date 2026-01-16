@@ -48,8 +48,8 @@ export interface TradeSignal {
   sizeShares?: number;
   /** Notional USD value of the trade */
   notionalUsd?: number;
-  /** Outcome: YES or NO */
-  outcome?: "YES" | "NO";
+  /** Outcome: YES, NO, or any other outcome string (for multi-outcome markets like sports) */
+  outcome?: string;
   /** Activity type from API */
   activityType?: ActivityType;
   /** Raw API response for debugging */
@@ -148,6 +148,14 @@ export interface TokenMetadata {
   noTokenId: string;
   endDate?: string;
   active: boolean;
+  /** All outcomes with their token IDs (for multi-outcome markets) */
+  outcomes?: OutcomeToken[];
+}
+
+export interface OutcomeToken {
+  tokenId: string;
+  outcome: string; // "Yes", "No", "Over", "Under", team names, etc.
+  price?: number;
 }
 
 // ============================================

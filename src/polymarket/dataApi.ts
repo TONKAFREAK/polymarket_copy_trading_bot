@@ -336,15 +336,12 @@ export class DataApiClient {
   }
 
   /**
-   * Parse outcome string to YES/NO
+   * Parse outcome string - preserves the original outcome for multi-outcome markets
+   * Returns the original outcome string (e.g., "Yes", "No", "Over", "Under", team names)
    */
-  private parseOutcome(outcome?: string): "YES" | "NO" | undefined {
+  private parseOutcome(outcome?: string): string | undefined {
     if (!outcome) return undefined;
-    const upper = outcome.toUpperCase();
-    if (upper === "YES" || upper === "NO") {
-      return upper as "YES" | "NO";
-    }
-    return undefined;
+    return outcome; // Preserve original casing for display
   }
 
   /**

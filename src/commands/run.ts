@@ -553,8 +553,9 @@ export function createRunCommand(): Command {
             }
           };
 
-          // Poll every 30 seconds for non-trade activities
-          activityPollerInterval = setInterval(pollActivities, 30000);
+          // Poll every 5 seconds for non-trade activities (REDEEM, SPLIT, MERGE)
+          // This is faster than before (30s) to catch sell/redeem signals quickly
+          activityPollerInterval = setInterval(pollActivities, 5000);
           // Run once immediately
           pollActivities();
         };
@@ -969,6 +970,7 @@ async function handleTradeDetected(
         targetShares: targetSharesDisplay,
         targetPrice: targetPriceDisplay,
         marketName,
+        outcome: signal.outcome, // YES, NO, Over, Under, team names, etc.
         copied: result.result?.success === true && !result.skipped,
         copyError: result.skipped
           ? result.skipReason

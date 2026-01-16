@@ -148,12 +148,13 @@ export class TokenResolver {
    * Resolve a token ID for order placement
    * Given partial information (tokenId, conditionId, slug, outcome),
    * returns the correct token ID for the CLOB
+   * Supports both YES/NO and multi-outcome markets (sports, up/down, etc.)
    */
   async resolveTokenId(params: {
     tokenId?: string;
     conditionId?: string;
     marketSlug?: string;
-    outcome?: "YES" | "NO";
+    outcome?: string; // YES, NO, Over, Under, team names, etc.
   }): Promise<string | null> {
     // If tokenId is already provided and looks valid, use it directly
     // Token IDs are long numeric strings (77+ digits)
@@ -214,12 +215,28 @@ export class TokenResolver {
 
   /**
    * Select the appropriate token from metadata based on outcome
+   * Supports both YES/NO and multi-outcome markets (sports, up/down, etc.)
    */
-  private selectToken(metadata: TokenMetadata, outcome?: "YES" | "NO"): string {
-    if (outcome === "NO") {
+  private selectToken(metadata: TokenMetadata, outcome?: string): string {
+    // For traditional YES/NO markets
+    if (outcome?.toUpperCase() === "NO") {
       return metadata.noTokenId;
     }
-    // Default to YES token
+    if (outcome?.toUpperCase() === "YES") {
+      return metadata.yesTokenId;
+    }
+
+    // For multi-outcome markets, search in outcomes array
+    if (outcome && metadata.outcomes && metadata.outcomes.length > 0) {
+      const matchingOutcome = metadata.outcomes.find(
+        (o) => o.outcome.toLowerCase() === outcome.toLowerCase()
+      );
+      if (matchingOutcome) {
+        return matchingOutcome.tokenId;
+      }
+    }
+
+    // Default to YES/first token
     return metadata.yesTokenId;
   }
 

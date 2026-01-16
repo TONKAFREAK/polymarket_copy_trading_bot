@@ -181,10 +181,88 @@ export class ClobClientWrapper {
   /**
    * Place an order on the CLOB
    * Uses the current Polymarket API format with tickSize and negRisk
+   * Includes pre-flight balance check and minimum order validation
    */
   async placeOrder(request: OrderRequest): Promise<OrderResult> {
     if (!this.client || !this.wallet) {
       throw new Error("Client not initialized. Call initialize() first.");
+    }
+
+    // Validate minimum order size (Polymarket minimum is typically $1 or 1 share)
+    const orderValue = request.price * request.size;
+    const MIN_ORDER_VALUE_USD = 0.50; // Minimum $0.50 order
+    const MIN_ORDER_SHARES = 0.1; // Minimum 0.1 shares
+
+    if (orderValue < MIN_ORDER_VALUE_USD) {
+      logger.warn("Order value too small, skipping", {
+        orderValue: orderValue.toFixed(4),
+        minRequired: MIN_ORDER_VALUE_USD,
+      });
+      return {
+        success: false,
+        errorMessage: `Order value $${orderValue.toFixed(2)} below minimum $${MIN_ORDER_VALUE_USD}`,
+      };
+    }
+
+    if (request.size < MIN_ORDER_SHARES) {
+      logger.warn("Order size too small, skipping", {
+        size: request.size,
+        minRequired: MIN_ORDER_SHARES,
+      });
+      return {
+        success: false,
+        errorMessage: `Order size ${request.size.toFixed(4)} below minimum ${MIN_ORDER_SHARES}`,
+      };
+    }
+
+    // Pre-flight balance check for BUY orders
+    if (request.side === "BUY") {
+      try {
+        const balances = await this.getBalances();
+        const availableUsdc = parseFloat(balances.usdc) || 0;
+        const requiredUsdc = orderValue * 1.01; // Add 1% buffer for fees
+
+        if (availableUsdc < requiredUsdc) {
+          logger.warn("Insufficient balance for order", {
+            available: availableUsdc.toFixed(2),
+            required: requiredUsdc.toFixed(2),
+            orderValue: orderValue.toFixed(2),
+          });
+          return {
+            success: false,
+            errorMessage: `Insufficient balance: have $${availableUsdc.toFixed(2)}, need $${requiredUsdc.toFixed(2)}`,
+          };
+        }
+      } catch (balanceError) {
+        // Don't fail the order if balance check fails - proceed anyway
+        logger.debug("Balance check failed, proceeding with order", {
+          error: (balanceError as Error).message,
+        });
+      }
+    }
+
+    // For SELL orders, verify we have the shares
+    if (request.side === "SELL") {
+      try {
+        const { balance } = await this.getTokenBalance(request.tokenId);
+        const availableShares = parseFloat(balance) / 1_000_000; // Convert from micro-units
+
+        if (availableShares < request.size) {
+          logger.warn("Insufficient shares for sell order", {
+            available: availableShares.toFixed(4),
+            required: request.size.toFixed(4),
+          });
+          return {
+            success: false,
+            errorMessage: `Insufficient shares: have ${availableShares.toFixed(2)}, need ${request.size.toFixed(2)}`,
+          };
+        }
+      } catch (shareError) {
+        // Don't fail if share check fails
+        logger.debug("Share balance check failed, proceeding", {
+          error: (shareError as Error).message,
+        });
+      }
     }
 
     try {
@@ -193,6 +271,7 @@ export class ClobClientWrapper {
         side: request.side,
         price: request.price,
         size: request.size,
+        orderValue: orderValue.toFixed(2),
       });
 
       // Get market parameters (with caching for speed)
@@ -382,6 +461,7 @@ export class ClobClientWrapper {
 
   /**
    * Place a marketable limit order (with slippage)
+   * Includes automatic retry for transient errors
    */
   async placeMarketableLimitOrder(
     tokenId: string,
@@ -403,6 +483,9 @@ export class ClobClientWrapper {
     // Round to 2 decimal places (Polymarket price precision)
     limitPrice = Math.round(limitPrice * 100) / 100;
 
+    // Round size to reasonable precision (avoid floating point issues)
+    size = Math.round(size * 100) / 100;
+
     const orderRequest: OrderRequest = {
       tokenId,
       side,
@@ -411,7 +494,55 @@ export class ClobClientWrapper {
       type: "GTC",
     };
 
-    return this.placeOrder(orderRequest);
+    // Retry logic for transient errors
+    const MAX_RETRIES = 2;
+    const RETRY_DELAY_MS = 500;
+    const RETRYABLE_ERRORS = [
+      "rate limit",
+      "ECONNRESET",
+      "ETIMEDOUT",
+      "socket hang up",
+      "Connection dropped",
+      "Connection error",
+      "API blocked",
+    ];
+
+    let lastResult: OrderResult | null = null;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const result = await this.placeOrder(orderRequest);
+      lastResult = result;
+
+      // If successful, return immediately
+      if (result.success) {
+        return result;
+      }
+
+      // Check if error is retryable
+      const errorMsg = result.errorMessage || "";
+      const isRetryable = RETRYABLE_ERRORS.some((e) =>
+        errorMsg.toLowerCase().includes(e.toLowerCase())
+      );
+
+      if (!isRetryable || attempt >= MAX_RETRIES) {
+        // Not retryable or max retries reached
+        return result;
+      }
+
+      // Wait before retry
+      logger.debug("Retrying order after transient error", {
+        attempt: attempt + 1,
+        maxRetries: MAX_RETRIES,
+        error: errorMsg,
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * (attempt + 1)));
+    }
+
+    return lastResult || {
+      success: false,
+      errorMessage: "Max retries exceeded",
+    };
   }
 
   /**

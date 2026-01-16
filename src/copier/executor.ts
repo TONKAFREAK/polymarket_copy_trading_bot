@@ -96,6 +96,26 @@ export class Executor {
       return this.handleRedeem(signal, timestamp);
     }
 
+    // Handle MERGE activities - target is exiting the market (merging YES+NO back to collateral)
+    // We should SELL our positions in this market to copy their exit
+    if (signal.activityType === "MERGE") {
+      return this.handleMerge(signal, timestamp);
+    }
+
+    // Skip SPLIT activities - this is when target splits collateral into YES+NO tokens
+    // This is just preparation for trading, not an actual trade to copy
+    if (signal.activityType === "SPLIT") {
+      const reason = "SPLIT activity skipped (preparation for trading)";
+      logOrderSkipped(logger, signal.tradeId, reason);
+      return {
+        signal,
+        skipped: true,
+        skipReason: reason,
+        dryRun: this.riskConfig.dryRun,
+        timestamp,
+      };
+    }
+
     // Calculate trade size
     const { size, usdValue } = this.calculateSize(signal);
 
@@ -536,6 +556,265 @@ export class Executor {
       signal,
       skipped: true,
       skipReason: "REDEEM: No token ID available for redemption",
+      dryRun: false,
+      timestamp,
+    };
+  }
+
+  /**
+   * Handle MERGE activity - sell our positions when target exits the market
+   * When target merges YES+NO tokens back to collateral, they're exiting
+   * We copy this by selling our positions in that market
+   */
+  private async handleMerge(
+    signal: TradeSignal,
+    timestamp: number
+  ): Promise<ExecutionResult> {
+    // Fetch market info to get the proper market name and conditionId
+    const { getGammaApiClient } = await import("../polymarket/gammaApi");
+    const gammaApi = getGammaApiClient();
+
+    let marketName = signal.marketSlug || "Unknown";
+    let conditionId = signal.conditionId;
+
+    // Try to get market info from token ID or slug
+    if (signal.tokenId && signal.tokenId.length > 20) {
+      try {
+        const marketInfo = await gammaApi.getMarketByTokenId(signal.tokenId);
+        if (marketInfo) {
+          marketName = String(
+            marketInfo.question || marketInfo.title || marketName
+          );
+          conditionId = conditionId || marketInfo.conditionId;
+        }
+      } catch {
+        // Ignore errors - try by slug
+      }
+    }
+
+    // Try by slug if we still don't have conditionId
+    if (!conditionId && signal.marketSlug) {
+      try {
+        const marketInfo = await gammaApi.getMarketBySlug(signal.marketSlug);
+        if (marketInfo) {
+          marketName = String(
+            marketInfo.question || marketInfo.title || marketName
+          );
+          conditionId = marketInfo.conditionId;
+        }
+      } catch {
+        // Ignore errors
+      }
+    }
+
+    logger.info("Processing MERGE activity - target exiting market", {
+      market: marketName,
+      conditionId: conditionId?.substring(0, 20) + "...",
+    });
+
+    // For paper trading, sell our positions
+    if (this.paperTradingEnabled && this.paperTradingManager) {
+      // Find and sell positions in this market (match by marketSlug)
+      const positions = this.paperTradingManager.getPositions();
+      let soldCount = 0;
+      let totalValue = 0;
+      const marketSlugLower = signal.marketSlug?.toLowerCase() || "";
+
+      for (const [tokenId, pos] of Object.entries(positions)) {
+        // Match by marketSlug
+        const posSlugLower = pos.marketSlug?.toLowerCase() || "";
+        const isMatch = marketSlugLower && posSlugLower.includes(marketSlugLower);
+
+        if (isMatch && pos.shares > 0 && !pos.settled) {
+          // Simulate selling the position
+          const currentPrice = pos.currentPrice ?? pos.avgEntryPrice;
+          const sellResult = await this.paperTradingManager.executePaperTrade(
+            { ...signal, tokenId, side: "SELL", price: currentPrice },
+            {
+              tokenId,
+              side: "SELL",
+              price: currentPrice,
+              size: pos.shares,
+              type: "GTC",
+            }
+          );
+          if (sellResult.success) {
+            soldCount++;
+            totalValue += (sellResult.executedPrice || currentPrice) * (sellResult.executedSize || pos.shares);
+          }
+        }
+      }
+
+      logger.info("MERGE (paper): Sold positions", {
+        market: marketName,
+        soldCount,
+        totalValue: totalValue.toFixed(2),
+      });
+
+      return {
+        signal,
+        result: {
+          success: soldCount > 0,
+          orderId: `MERGE_PAPER_${Date.now()}`,
+          executedPrice: totalValue,
+          executedSize: soldCount,
+        },
+        skipped: soldCount === 0,
+        skipReason: soldCount === 0 ? "No positions to sell" : undefined,
+        dryRun: false,
+        timestamp,
+      };
+    }
+
+    // For dry-run, just log it
+    if (this.riskConfig.dryRun) {
+      logger.info("MERGE (dry-run): Target exited market", {
+        market: marketName,
+      });
+      return {
+        signal,
+        result: {
+          success: true,
+          orderId: `MERGE_DRY_${Date.now()}`,
+        },
+        skipped: false,
+        dryRun: true,
+        timestamp,
+      };
+    }
+
+    // For live trading, find and sell our positions
+    if (conditionId || signal.marketSlug) {
+      try {
+        const { sellPositions } = await import("../commands/sell");
+
+        // Get our positions
+        const { positions } = await this.getPositions();
+
+        // Find positions in this market
+        let matchingPositions = positions.filter(
+          (pos) => pos.conditionId === conditionId && pos.shares > 0.01
+        );
+
+        // Fallback: match by market slug/name
+        if (matchingPositions.length === 0 && signal.marketSlug) {
+          matchingPositions = positions.filter(
+            (pos) =>
+              (pos.market?.toLowerCase().includes(signal.marketSlug!.toLowerCase()) ||
+                pos.conditionId?.includes(signal.marketSlug!)) &&
+              pos.shares > 0.01
+          );
+        }
+
+        if (matchingPositions.length === 0) {
+          logger.info("MERGE: No positions found to sell in this market", {
+            market: marketName,
+          });
+          return {
+            signal,
+            result: {
+              success: true,
+              orderId: `MERGE_NO_POS_${Date.now()}`,
+            },
+            skipped: false,
+            dryRun: false,
+            timestamp,
+          };
+        }
+
+        logger.info("MERGE: Found positions to sell (copying target exit)", {
+          market: marketName,
+          positionCount: matchingPositions.length,
+          positions: matchingPositions.map((p) => ({
+            outcome: p.outcome,
+            shares: p.shares.toFixed(2),
+          })),
+        });
+
+        // Sell each position
+        let totalSold = 0;
+        let totalValue = 0;
+        let lastOrderId: string | undefined;
+
+        for (const pos of matchingPositions) {
+          try {
+            const sellResults = await sellPositions({
+              tokenId: pos.tokenId,
+              slippage: 0.03, // 3% slippage for MERGE sells
+              dryRun: false,
+            });
+
+            if (sellResults.length > 0 && sellResults[0].success) {
+              totalSold++;
+              totalValue += sellResults[0].value;
+              lastOrderId = sellResults[0].orderId;
+              logger.info("MERGE: Position sold", {
+                outcome: pos.outcome,
+                shares: pos.shares.toFixed(2),
+                value: sellResults[0].value.toFixed(2),
+              });
+            }
+          } catch (sellError) {
+            logger.warn("MERGE: Failed to sell position", {
+              tokenId: pos.tokenId.substring(0, 16) + "...",
+              error: (sellError as Error).message,
+            });
+          }
+        }
+
+        if (totalSold > 0) {
+          logger.info("MERGE: Exit complete", {
+            market: marketName,
+            soldCount: totalSold,
+            totalValue: totalValue.toFixed(2),
+          });
+          return {
+            signal,
+            result: {
+              success: true,
+              orderId: lastOrderId || `MERGE_${Date.now()}`,
+              executedPrice: totalValue,
+              executedSize: totalSold,
+            },
+            skipped: false,
+            dryRun: false,
+            timestamp,
+          };
+        } else {
+          return {
+            signal,
+            result: {
+              success: false,
+              errorMessage: "Failed to sell positions",
+            },
+            skipped: false,
+            dryRun: false,
+            timestamp,
+          };
+        }
+      } catch (error) {
+        logger.error("MERGE: Failed to process", {
+          market: marketName,
+          error: (error as Error).message,
+        });
+        return {
+          signal,
+          result: {
+            success: false,
+            errorMessage: (error as Error).message,
+          },
+          skipped: false,
+          dryRun: false,
+          timestamp,
+        };
+      }
+    }
+
+    // No market identifier available
+    return {
+      signal,
+      skipped: true,
+      skipReason: "MERGE: Could not identify market",
       dryRun: false,
       timestamp,
     };

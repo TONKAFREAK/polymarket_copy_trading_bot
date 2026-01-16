@@ -172,18 +172,31 @@ export class GammaApiClient {
 
   /**
    * Convert a Gamma market response to our TokenMetadata format
+   * Supports both YES/NO markets and multi-outcome markets (sports, up/down, etc.)
    */
   normalizeMarket(market: GammaMarket): TokenMetadata | null {
-    if (!market || !market.tokens || market.tokens.length < 2) {
+    if (!market || !market.tokens || market.tokens.length < 1) {
       return null;
     }
 
-    // Find YES and NO tokens
+    // Find YES and NO tokens (for traditional binary markets)
     let yesTokenId = "";
     let noTokenId = "";
 
+    // Build outcomes array for all tokens (supports multi-outcome markets)
+    const outcomes: { tokenId: string; outcome: string; price?: number }[] = [];
+
     for (const token of market.tokens) {
-      const outcome = token.outcome?.toUpperCase();
+      const outcome = token.outcome?.toUpperCase() || "";
+      const originalOutcome = token.outcome || `Outcome ${outcomes.length + 1}`;
+
+      outcomes.push({
+        tokenId: token.token_id,
+        outcome: originalOutcome,
+        price: token.price,
+      });
+
+      // Also populate YES/NO for backward compatibility
       if (outcome === "YES") {
         yesTokenId = token.token_id;
       } else if (outcome === "NO") {
@@ -191,9 +204,17 @@ export class GammaApiClient {
       }
     }
 
-    // If not found by name, assume first is YES, second is NO
+    // If YES/NO not found by name, assume first is YES, second is NO (for binary markets)
     if (!yesTokenId && !noTokenId && market.tokens.length >= 2) {
       yesTokenId = market.tokens[0].token_id;
+      noTokenId = market.tokens[1].token_id;
+    }
+
+    // For single-outcome or multi-outcome markets without YES/NO
+    if (!yesTokenId && market.tokens.length >= 1) {
+      yesTokenId = market.tokens[0].token_id;
+    }
+    if (!noTokenId && market.tokens.length >= 2) {
       noTokenId = market.tokens[1].token_id;
     }
 
@@ -205,6 +226,7 @@ export class GammaApiClient {
       noTokenId,
       endDate: market.endDate,
       active: market.active && !market.closed,
+      outcomes,
     };
   }
 

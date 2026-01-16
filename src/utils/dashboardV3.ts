@@ -64,6 +64,7 @@ export interface TradeLogEntry {
   side?: "BUY" | "SELL";
   marketName?: string;
   tokenId?: string;
+  outcome?: string; // YES, NO, Over, Under, team names, etc.
   // Copy result
   copied?: boolean;
   copyError?: string;
@@ -92,6 +93,7 @@ export class DashboardV3 {
   private lastHeaderContent: string = "";
   private lastStatsContent: string = "";
   private lastStatusBarContent: string = "";
+  private lastTargetsContent: string = "";
   private positionsNeedRefresh: boolean = true;
 
   constructor() {
@@ -394,6 +396,7 @@ export class DashboardV3 {
     targetShares: number;
     targetPrice: number;
     marketName: string;
+    outcome?: string; // YES, NO, Over, Under, team names, etc.
     // Copy result
     copied: boolean;
     copyError?: string;
@@ -420,6 +423,7 @@ export class DashboardV3 {
       yourPrice: entry.yourPrice,
       yourTotal,
       marketName: entry.marketName,
+      outcome: entry.outcome,
       copied: entry.copied,
       copyError: entry.copyError,
       question: entry.question,
@@ -667,11 +671,9 @@ export class DashboardV3 {
   }
 
   private renderTargets(): void {
-    // Cast to log for proper scrollable content
-    const targetLog = this.targetBox as unknown as blessed.Widgets.Log;
-
-    // Clear and rebuild content
-    targetLog.setContent("");
+    // Build content string first to check if it changed (prevents flickering)
+    const contentLines: string[] = [];
+    let newLabel = " 🎯 Targets ";
 
     // In live or paper mode, show ALL positions
     if (
@@ -679,9 +681,7 @@ export class DashboardV3 {
       this.livePositions.length > 0
     ) {
       const labelPrefix = this.stats.mode === "paper" ? "Paper " : "";
-      this.targetBox.setLabel(
-        ` 📊 ${labelPrefix}Holdings` //(${this.livePositions.length})
-      );
+      newLabel = ` 📊 ${labelPrefix}Holdings`;
 
       // Show ALL positions with full details
       for (const pos of this.livePositions) {
@@ -721,34 +721,25 @@ export class DashboardV3 {
         if (feeStr) {
           feesDisplay = ` {white-fg}${feeStr}{/}`;
         }
-        targetLog.log(
+        contentLines.push(
           `${statusIcon} {${sideColor}-fg}${sideStr}{/} ${sharesStr} ${valueStr} ${pnlStr}${feesDisplay}`
         );
 
         // Line 2: Market question (full name, wrapped if needed)
         const marketName = pos.market || "Unknown Market";
-        targetLog.log(`  {white-fg}${marketName}{/}`);
+        contentLines.push(`  {white-fg}${marketName}{/}`);
 
         // Line 3: Full Token ID
-        targetLog.log(`  {white-fg}ID: ${pos.tokenId}{/}`);
+        contentLines.push(`  {white-fg}ID: ${pos.tokenId}{/}`);
       }
-
-      // Legend at bottom
-      // targetLog.log(`{white-fg}─────────────────────────────────{/}`);
-      // targetLog.log(
-      //   `{cyan-fg}●{/}Open {green-fg}✓{/}Redeemable {yellow-fg}○{/}Lost`
-      // );
     } else {
       // Show targets when no positions
-      this.targetBox.setLabel(" 🎯 Targets ");
-
       if (this.targetAddresses.length === 0) {
-        targetLog.log("{white-fg}No targets configured{/}");
+        contentLines.push("{white-fg}No targets configured{/}");
       } else {
         for (let i = 0; i < this.targetAddresses.length; i++) {
           const addr = this.targetAddresses[i];
-          //const shortAddr = `${addr.substring(0, 8)}...${addr.slice(-6)}`;
-          targetLog.log(
+          contentLines.push(
             `{yellow-fg}${(i + 1)
               .toString()
               .padStart(2)}.{/} {white-fg}${addr}{/}`
@@ -757,19 +748,19 @@ export class DashboardV3 {
       }
     }
 
-    // // Add trading stats at the bottom
-    // targetLog.log(`{white-fg}─────────────────────────────────{/}`);
-    // targetLog.log(
-    //   `{cyan-fg}Trades:{/} ${String(this.stats.totalTrades).padStart(
-    //     4
-    //   )}  {cyan-fg}Win:{/} ${this.stats.winRate.toFixed(1).padStart(5)}%`
-    // );
-
     if (
       this.stats.openOrdersCount !== undefined &&
       this.stats.openOrdersCount > 0
     ) {
-      targetLog.log(`{cyan-fg}Open Orders:{/} ${this.stats.openOrdersCount}`);
+      contentLines.push(`{cyan-fg}Open Orders:{/} ${this.stats.openOrdersCount}`);
+    }
+
+    // Only update if content actually changed (prevents flickering)
+    const newContent = contentLines.join("\n");
+    if (newContent !== this.lastTargetsContent) {
+      this.lastTargetsContent = newContent;
+      this.targetBox.setLabel(newLabel);
+      this.targetBox.setContent(newContent);
     }
   }
 
@@ -800,21 +791,26 @@ export class DashboardV3 {
   private addActivityLogLine(entry: TradeLogEntry): void {
     const time = this.formatTime(entry.timestamp);
 
-    // Format activity type with color
+    // Format activity type with color - include outcome for multi-outcome markets
     let activityIcon: string;
+    const outcomeStr = entry.outcome ? ` ${entry.outcome.toUpperCase()}` : "";
+
     switch (entry.activityType) {
       case "TRADE":
-        activityIcon =
-          entry.side === "BUY" ? "{green-fg}BUY {/}" : "{red-fg}SELL{/}";
+        if (entry.side === "BUY") {
+          activityIcon = `{green-fg}BUY${outcomeStr}{/}`;
+        } else {
+          activityIcon = `{red-fg}SELL${outcomeStr}{/}`;
+        }
         break;
       case "REDEEM":
         activityIcon = "{magenta-fg}REDM{/}";
         break;
       case "SPLIT":
-        activityIcon = "{cyan-fg}SPLT{/}";
+        activityIcon = `{cyan-fg}SPLT${outcomeStr}{/}`;
         break;
       case "MERGE":
-        activityIcon = "{cyan-fg}MERG{/}";
+        activityIcon = `{cyan-fg}MERG${outcomeStr}{/}`;
         break;
       default:
         activityIcon = "{white-fg}    {/}";

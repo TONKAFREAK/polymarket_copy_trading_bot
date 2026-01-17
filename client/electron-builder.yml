@@ -1,0 +1,31 @@
+appId: com.polymarket.copytrader
+productName: Polymarket Copy Trader
+copyright: Copyright © 2026
+directories:
+  output: dist
+  buildResources: resources
+files:
+  - from: .
+    filter:
+      - package.json
+      - app
+extraResources:
+  - from: ../data
+    to: data
+    filter:
+      - "*.json"
+publish: null
+win:
+  target:
+    - target: dir
+      arch: x64
+  icon: resources/icon.ico
+  requestedExecutionLevel: asInvoker
+  rfc3161TimeStampServer: null
+  signAndEditExecutable: false
+mac:
+  target: dmg
+  icon: resources/icon.icns
+linux:
+  target: AppImage
+  icon: resources/icon.png

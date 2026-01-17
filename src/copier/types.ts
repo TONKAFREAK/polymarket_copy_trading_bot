@@ -238,6 +238,14 @@ export interface GammaMarket {
   endDate: string;
   active: boolean;
   closed: boolean;
+  /** Market title/question for display */
+  title?: string;
+  /** Market description */
+  description?: string;
+  /** URL of the market's image */
+  image?: string;
+  /** URL of the market's icon */
+  icon?: string;
   /** Comma-separated outcome prices, e.g. "1,0" means YES won, "0,1" means NO won */
   outcomePrices?: string;
   /** JSON string of outcomes array, e.g. '["Yes","No"]' */
@@ -248,6 +256,10 @@ export interface GammaMarket {
   closedTime?: string;
   /** CLOB token IDs as JSON array string */
   clobTokenIds?: string;
+  /** Event ID for grouping related markets */
+  eventId?: string;
+  /** Event slug for the parent event */
+  eventSlug?: string;
   [key: string]: unknown;
 }
 

@@ -205,8 +205,7 @@ function AddAccountModal({
 
           <div className="space-y-2">
             <label className="block text-sm text-white/70">
-              Funder Address{" "}
-              <span className="text-white/30">(optional)</span>
+              Funder Address <span className="text-white/30">(optional)</span>
             </label>
             <input
               type="text"
@@ -240,8 +239,8 @@ function AddAccountModal({
                   Security Notice
                 </p>
                 <p className="text-amber-400/70 text-xs mt-1">
-                  Your credentials are stored locally and encrypted. Never
-                  share your private key or API secrets with anyone.
+                  Your credentials are stored locally and encrypted. Never share
+                  your private key or API secrets with anyone.
                 </p>
               </div>
             </div>
@@ -310,8 +309,10 @@ function PaperTradingPopup({
             Welcome to Paper Trading
           </h2>
           <p className="text-white/60 text-sm leading-relaxed mb-6">
-            You&apos;re starting in <span className="text-amber-400 font-medium">Paper Trading</span> mode with $10,000 in virtual funds.
-            This allows you to test strategies risk-free before trading with real money.
+            You&apos;re starting in{" "}
+            <span className="text-amber-400 font-medium">Paper Trading</span>{" "}
+            mode with $10,000 in virtual funds. This allows you to test
+            strategies risk-free before trading with real money.
           </p>
 
           {/* Info box */}
@@ -335,8 +336,8 @@ function PaperTradingPopup({
                   Ready for live trading?
                 </p>
                 <p className="text-white/50 text-xs">
-                  Click the account selector in the navbar and add a live trading account
-                  with your Polymarket API credentials.
+                  Click the account selector in the navbar and add a live
+                  trading account with your Polymarket API credentials.
                 </p>
               </div>
             </div>
@@ -405,7 +406,9 @@ export default function HomePage() {
   useEffect(() => {
     const checkPaperPopup = async () => {
       try {
-        const hasSeenPopup = await window.ipc?.invoke<boolean>("accounts:hasSeenPaperPopup");
+        const hasSeenPopup = await window.ipc?.invoke<boolean>(
+          "accounts:hasSeenPaperPopup",
+        );
         if (!hasSeenPopup) {
           setShowPaperPopup(true);
         }
@@ -420,7 +423,8 @@ export default function HomePage() {
   useEffect(() => {
     const checkAccounts = async () => {
       try {
-        const accounts = await window.ipc?.invoke<AccountInfo[]>("accounts:getAll");
+        const accounts =
+          await window.ipc?.invoke<AccountInfo[]>("accounts:getAll");
         setWalletConfigured(accounts && accounts.length > 0);
       } catch (e) {
         console.error("Failed to check accounts:", e);
@@ -433,7 +437,10 @@ export default function HomePage() {
   const handleSettingsSaved = useCallback(() => {
     if (status.running) {
       setNeedsRestart(true);
-      addDebugLog("warn", "Settings saved while bot running - restart required for changes to take effect");
+      addDebugLog(
+        "warn",
+        "Settings saved while bot running - restart required for changes to take effect",
+      );
     }
   }, [status.running]);
 
@@ -450,7 +457,7 @@ export default function HomePage() {
           addSimpleLog("info", "Connected to Polymarket WebSocket");
           addDebugLog(
             "info",
-            "WebSocket connected to Polymarket real-time data feed"
+            "WebSocket connected to Polymarket real-time data feed",
           );
           addDebugLog("debug", "Subscribed to: trades, orders_matched");
           break;
@@ -467,7 +474,7 @@ export default function HomePage() {
             }));
             addDebugLog(
               "debug",
-              `Status: connected=${event.data.connected}, messages=${event.data.messagesReceived || 0}, trades=${event.data.targetTradesDetected || 0}`
+              `Status: connected=${event.data.connected}, messages=${event.data.messagesReceived || 0}, trades=${event.data.targetTradesDetected || 0}`,
             );
           }
           break;
@@ -477,15 +484,15 @@ export default function HomePage() {
             addTradeLog("target", event.data);
             addDebugLog(
               "info",
-              `Trade detected from target: ${event.data.targetWallet?.slice(0, 10)}...`
+              `Trade detected from target: ${event.data.targetWallet?.slice(0, 10)}...`,
             );
             addDebugLog(
               "debug",
-              `  > ${event.data.side} ${event.data.outcome} | ${event.data.size?.toFixed(2)} shares @ $${event.data.price?.toFixed(3)}`
+              `  > ${event.data.side} ${event.data.outcome} | ${event.data.size?.toFixed(2)} shares @ $${event.data.price?.toFixed(3)}`,
             );
             addDebugLog(
               "debug",
-              `  > Market: ${event.data.marketSlug || event.data.title || "unknown"}`
+              `  > Market: ${event.data.marketSlug || event.data.title || "unknown"}`,
             );
           }
           break;
@@ -495,11 +502,11 @@ export default function HomePage() {
             addExecutedTradeLog(event.data);
             addDebugLog(
               "info",
-              `Trade executed: ${event.data.yourShares?.toFixed(2)} shares @ $${event.data.yourPrice?.toFixed(3)}`
+              `Trade executed: ${event.data.yourShares?.toFixed(2)} shares @ $${event.data.yourPrice?.toFixed(3)}`,
             );
             addDebugLog(
               "debug",
-              `  > Total: $${event.data.yourTotal?.toFixed(2)} | Fees: $${event.data.fees?.toFixed(4)} | Latency: ${event.data.latencyMs}ms`
+              `  > Total: $${event.data.yourTotal?.toFixed(2)} | Fees: $${event.data.fees?.toFixed(4)} | Latency: ${event.data.latencyMs}ms`,
             );
           }
           break;
@@ -510,7 +517,7 @@ export default function HomePage() {
             if (event.data.signal) {
               addDebugLog(
                 "debug",
-                `  > Would have been: ${event.data.signal.side} ${event.data.signal.outcome} @ $${event.data.signal.price?.toFixed(3)}`
+                `  > Would have been: ${event.data.signal.side} ${event.data.signal.outcome} @ $${event.data.signal.price?.toFixed(3)}`,
               );
             }
           }
@@ -531,14 +538,26 @@ export default function HomePage() {
             let prefix = "";
             if (level === "info" && event.data.message?.includes("poll")) {
               prefix = "";
-            } else if (level === "info" && event.data.message?.includes("redeem")) {
+            } else if (
+              level === "info" &&
+              event.data.message?.includes("redeem")
+            ) {
               prefix = "";
-            } else if (level === "info" && event.data.message?.includes("position")) {
+            } else if (
+              level === "info" &&
+              event.data.message?.includes("position")
+            ) {
               prefix = "";
-            } else if (level === "info" && event.data.message?.includes("balance")) {
+            } else if (
+              level === "info" &&
+              event.data.message?.includes("balance")
+            ) {
               prefix = "";
             }
-            addDebugLog(level as DebugLog["level"], `${prefix}${event.data.message}`);
+            addDebugLog(
+              level as DebugLog["level"],
+              `${prefix}${event.data.message}`,
+            );
 
             // Only add non-debug logs to activity log
             if (level !== "debug") {
@@ -700,13 +719,19 @@ export default function HomePage() {
 
   const handleAccountAdded = useCallback((account: AccountInfo) => {
     setWalletConfigured(true);
-    addDebugLog("info", `Account added: ${account.name} (${account.address.slice(0, 6)}...${account.address.slice(-4)})`);
+    addDebugLog(
+      "info",
+      `Account added: ${account.name} (${account.address.slice(0, 6)}...${account.address.slice(-4)})`,
+    );
   }, []);
 
   const handleAccountSwitch = useCallback((needsRestartBot: boolean) => {
     if (needsRestartBot) {
       setNeedsRestart(true);
-      addDebugLog("warn", "Account switched - restart required for changes to take effect");
+      addDebugLog(
+        "warn",
+        "Account switched - restart required for changes to take effect",
+      );
     }
   }, []);
 
@@ -751,7 +776,10 @@ export default function HomePage() {
           onAccountSwitch={handleAccountSwitch}
         />
         <div className="flex-1 overflow-hidden">
-          <Tabs realtimeLogs={realtimeLogs} onSettingsSaved={handleSettingsSaved} />
+          <Tabs
+            realtimeLogs={realtimeLogs}
+            onSettingsSaved={handleSettingsSaved}
+          />
         </div>
 
         {/* Settings Saved While Running Warning Banner */}
@@ -772,7 +800,8 @@ export default function HomePage() {
                 />
               </svg>
               <span className="text-amber-400 text-sm font-medium">
-                Settings changed. For the new changes to take place, please restart the bot.
+                Settings changed. For the new changes to take place, please
+                restart the bot.
               </span>
             </div>
             <button

@@ -13,7 +13,7 @@ let dataDir: string;
 // Helper to get data directory (must be called after app.whenReady())
 function getDataDir(): string {
   if (dataDir) return dataDir;
-  
+
   if (isProd) {
     // In production, use app's userData folder which is writable
     dataDir = path.join(app.getPath("userData"), "data");
@@ -21,12 +21,12 @@ function getDataDir(): string {
     // In development, use the project's data folder
     dataDir = path.join(__dirname, "..", "..", "data");
   }
-  
+
   // Ensure directory exists
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
   }
-  
+
   return dataDir;
 }
 
@@ -69,12 +69,12 @@ async function fetchMarketMeta(slug: string): Promise<MarketMeta | null> {
 
   try {
     const response = await fetch(
-      `https://gamma-api.polymarket.com/markets/${slug}`
+      `https://gamma-api.polymarket.com/markets/${slug}`,
     );
     if (!response.ok) {
       // For short-term markets, try the events endpoint
       const eventResponse = await fetch(
-        `https://gamma-api.polymarket.com/events?slug=${slug}`
+        `https://gamma-api.polymarket.com/events?slug=${slug}`,
       );
       if (eventResponse.ok) {
         const events = await eventResponse.json();
@@ -112,7 +112,9 @@ async function fetchMarketMeta(slug: string): Promise<MarketMeta | null> {
 
 // Batch fetch market metadata for multiple slugs
 async function fetchMarketMetaBatch(slugs: string[]): Promise<void> {
-  const uniqueSlugs = Array.from(new Set(slugs.filter((s) => s && s !== "unknown")));
+  const uniqueSlugs = Array.from(
+    new Set(slugs.filter((s) => s && s !== "unknown")),
+  );
   const unfetched = uniqueSlugs.filter((s) => {
     const cached = marketMetaCache.get(s);
     return !cached || Date.now() - cached.fetchedAt > CACHE_TTL_MS;
@@ -347,7 +349,7 @@ ipcMain.handle(
       config.paperTrading = { ...config.paperTrading, ...values };
     }
     return writeJsonFile("config.json", config);
-  }
+  },
 );
 
 // Get dashboard stats
@@ -360,7 +362,9 @@ ipcMain.handle("stats:get", async () => {
 
   // Determine mode from accounts state (takes priority over config)
   const accountsState = loadAccountsState();
-  let mode: "dry-run" | "paper" | "live" = accountsState.activeAccountId ? "live" : "paper";
+  let mode: "dry-run" | "paper" | "live" = accountsState.activeAccountId
+    ? "live"
+    : "paper";
   if (config.risk?.dryRun && mode !== "live") mode = "dry-run";
 
   // Get bot status from service
@@ -416,7 +420,7 @@ ipcMain.handle("stats:get", async () => {
   // Calculate stats from paper state
   const positions = Object.values(paperState.positions || {});
   const activePositions = positions.filter(
-    (p: any) => p.shares > 0 && !p.settled
+    (p: any) => p.shares > 0 && !p.settled,
   );
   const positionsValue = activePositions.reduce((sum: number, p: any) => {
     const price = p.currentPrice || p.avgEntryPrice;
@@ -484,13 +488,18 @@ ipcMain.handle("portfolio:get", async () => {
           shares: pos.shares || 0,
           avgEntryPrice: pos.avgEntryPrice || 0,
           currentValue: pos.currentValue || 0,
-          currentPrice: pos.shares > 0 ? (pos.currentValue / pos.shares) : pos.avgEntryPrice,
+          currentPrice:
+            pos.shares > 0 ? pos.currentValue / pos.shares : pos.avgEntryPrice,
           market: pos.market || "Unknown Market",
           marketSlug: pos.marketSlug,
           side: "BUY",
-          pnl: pos.currentValue - (pos.avgEntryPrice * pos.shares),
-          pnlPercent: pos.avgEntryPrice > 0 ? 
-            ((pos.currentValue / pos.shares - pos.avgEntryPrice) / pos.avgEntryPrice * 100) : 0,
+          pnl: pos.currentValue - pos.avgEntryPrice * pos.shares,
+          pnlPercent:
+            pos.avgEntryPrice > 0
+              ? ((pos.currentValue / pos.shares - pos.avgEntryPrice) /
+                  pos.avgEntryPrice) *
+                100
+              : 0,
           totalCost: pos.avgEntryPrice * pos.shares,
           openedAt: Date.now(),
           isResolved: pos.isResolved || false,
@@ -498,7 +507,7 @@ ipcMain.handle("portfolio:get", async () => {
           settled: false,
           conditionId: pos.conditionId,
           feesPaid: pos.feesPaid || 0,
-          image: pos.marketSlug 
+          image: pos.marketSlug
             ? `https://polymarket-upload.s3.us-east-2.amazonaws.com/${pos.marketSlug}.png`
             : undefined,
         }));
@@ -645,10 +654,10 @@ ipcMain.handle("performance:get", async () => {
 
   const totalWins = winningTrades.reduce(
     (sum: number, t: any) => sum + t.pnl,
-    0
+    0,
   );
   const totalLosses = Math.abs(
-    losingTrades.reduce((sum: number, t: any) => sum + t.pnl, 0)
+    losingTrades.reduce((sum: number, t: any) => sum + t.pnl, 0),
   );
 
   const avgWin =
@@ -667,11 +676,11 @@ ipcMain.handle("performance:get", async () => {
 
   const totalVolume = trades.reduce(
     (sum: number, t: any) => sum + (t.usdValue || 0),
-    0
+    0,
   );
   const totalFees = trades.reduce(
     (sum: number, t: any) => sum + (t.fees || 0),
-    0
+    0,
   );
 
   const startingBalance = paperState.startingBalance || 10000;
@@ -718,21 +727,21 @@ ipcMain.handle("chart:recordSnapshot", async () => {
     currentBalance: 10000,
     positions: {},
   });
-  
+
   // Calculate unrealized PnL
   let unrealizedPnl = 0;
   const positions = paperState.positions || {};
   for (const pos of Object.values(positions) as any[]) {
     if (pos && pos.shares > 0 && pos.currentPrice !== undefined) {
       const currentValue = pos.shares * pos.currentPrice;
-      const costBasis = pos.totalCost || (pos.avgEntryPrice * pos.shares);
+      const costBasis = pos.totalCost || pos.avgEntryPrice * pos.shares;
       unrealizedPnl += currentValue - costBasis;
     }
   }
-  
+
   const realizedPnl = paperState.stats?.totalRealizedPnl || 0;
   const totalPnl = realizedPnl + unrealizedPnl;
-  
+
   const snapshot = {
     timestamp: Date.now(),
     pnl: totalPnl,
@@ -740,21 +749,27 @@ ipcMain.handle("chart:recordSnapshot", async () => {
     unrealizedPnl,
     balance: paperState.startingBalance + totalPnl,
   };
-  
+
   // Load existing history
   const chartHistory = readJsonFile("chart-history.json", { snapshots: [] });
-  
+
   // Add new snapshot (keep last 10080 points = 7 days at 1 min intervals)
   chartHistory.snapshots.push(snapshot);
   if (chartHistory.snapshots.length > 10080) {
     // Downsample older data: keep every 5th point for data older than 24 hours
     const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-    const recentSnapshots = chartHistory.snapshots.filter((s: any) => s.timestamp >= oneDayAgo);
-    const oldSnapshots = chartHistory.snapshots.filter((s: any) => s.timestamp < oneDayAgo);
-    const downsampledOld = oldSnapshots.filter((_: any, i: number) => i % 5 === 0);
+    const recentSnapshots = chartHistory.snapshots.filter(
+      (s: any) => s.timestamp >= oneDayAgo,
+    );
+    const oldSnapshots = chartHistory.snapshots.filter(
+      (s: any) => s.timestamp < oneDayAgo,
+    );
+    const downsampledOld = oldSnapshots.filter(
+      (_: any, i: number) => i % 5 === 0,
+    );
     chartHistory.snapshots = [...downsampledOld, ...recentSnapshots];
   }
-  
+
   writeJsonFile("chart-history.json", chartHistory);
   return snapshot;
 });
@@ -819,13 +834,13 @@ ipcMain.handle("position:sell", async (_event, tokenId: string) => {
     paperState.stats.winningTrades = (paperState.stats.winningTrades || 0) + 1;
     paperState.stats.largestWin = Math.max(
       paperState.stats.largestWin || 0,
-      pnl
+      pnl,
     );
   } else if (pnl < 0) {
     paperState.stats.losingTrades = (paperState.stats.losingTrades || 0) + 1;
     paperState.stats.largestLoss = Math.min(
       paperState.stats.largestLoss || 0,
-      pnl
+      pnl,
     );
   }
 
@@ -872,7 +887,7 @@ ipcMain.handle("logs:get", async () => {
       if (latestFile) {
         const content = fs.readFileSync(
           path.join(logsDir, latestFile),
-          "utf-8"
+          "utf-8",
         );
         const lines = content
           .split("\n")
@@ -938,7 +953,7 @@ ipcMain.handle("targets:add", async (_event, address: string) => {
 ipcMain.handle("targets:remove", async (_event, address: string) => {
   const config = readJsonFile("config.json", { targets: [] });
   config.targets = config.targets.filter(
-    (t: string) => t.toLowerCase() !== address.toLowerCase()
+    (t: string) => t.toLowerCase() !== address.toLowerCase(),
   );
   writeJsonFile("config.json", config);
   return config.targets;
@@ -1081,7 +1096,7 @@ ipcMain.handle(
       polyApiSecret: string;
       polyPassphrase: string;
       polyFunderAddress?: string;
-    }
+    },
   ) => {
     const envFile = getEnvFilePath();
     try {
@@ -1138,7 +1153,7 @@ ipcMain.handle(
       console.error("Error saving wallet config:", e);
       return { success: false, error: e.message };
     }
-  }
+  },
 );
 
 // Reset paper trading state
@@ -1215,7 +1230,9 @@ function saveAccountsState(state: AccountsState): boolean {
 }
 
 // Helper to derive address from private key
-async function deriveAddressFromPrivateKey(privateKey: string): Promise<string | null> {
+async function deriveAddressFromPrivateKey(
+  privateKey: string,
+): Promise<string | null> {
   try {
     const { ethers } = await import("ethers");
     let pk = privateKey.trim();
@@ -1245,7 +1262,9 @@ ipcMain.handle("accounts:getAll", async () => {
 // Get current trading mode info
 ipcMain.handle("accounts:getTradingMode", async () => {
   const state = loadAccountsState();
-  const paperState = readJsonFile("paper-state.json", { currentBalance: 10000 });
+  const paperState = readJsonFile("paper-state.json", {
+    currentBalance: 10000,
+  });
 
   if (state.activeAccountId === null) {
     // Paper trading mode
@@ -1257,7 +1276,9 @@ ipcMain.handle("accounts:getTradingMode", async () => {
   }
 
   // Live trading mode
-  const activeAccount = state.accounts.find((acc) => acc.id === state.activeAccountId);
+  const activeAccount = state.accounts.find(
+    (acc) => acc.id === state.activeAccountId,
+  );
   if (!activeAccount) {
     // Account not found, fall back to paper
     return {
@@ -1293,78 +1314,89 @@ ipcMain.handle("accounts:getTradingMode", async () => {
 });
 
 // Add a new live account
-ipcMain.handle("accounts:add", async (_event, accountData: {
-  name: string;
-  privateKey: string;
-  polyApiKey: string;
-  polyApiSecret: string;
-  polyPassphrase: string;
-  polyFunderAddress?: string;
-}) => {
-  try {
-    const state = loadAccountsState();
+ipcMain.handle(
+  "accounts:add",
+  async (
+    _event,
+    accountData: {
+      name: string;
+      privateKey: string;
+      polyApiKey: string;
+      polyApiSecret: string;
+      polyPassphrase: string;
+      polyFunderAddress?: string;
+    },
+  ) => {
+    try {
+      const state = loadAccountsState();
 
-    // Derive address from private key
-    const address = await deriveAddressFromPrivateKey(accountData.privateKey);
-    if (!address) {
-      return { success: false, error: "Invalid private key" };
+      // Derive address from private key
+      const address = await deriveAddressFromPrivateKey(accountData.privateKey);
+      if (!address) {
+        return { success: false, error: "Invalid private key" };
+      }
+
+      // Check if account with this address already exists
+      const existingAccount = state.accounts.find(
+        (acc) => acc.address.toLowerCase() === address.toLowerCase(),
+      );
+      if (existingAccount) {
+        return {
+          success: false,
+          error: "Account with this address already exists",
+        };
+      }
+
+      // Create new account
+      const newAccount: LiveAccount = {
+        id: `account-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: accountData.name || `Account ${state.accounts.length + 1}`,
+        address,
+        privateKey: accountData.privateKey.startsWith("0x")
+          ? accountData.privateKey.slice(2)
+          : accountData.privateKey,
+        polyApiKey: accountData.polyApiKey,
+        polyApiSecret: accountData.polyApiSecret,
+        polyPassphrase: accountData.polyPassphrase,
+        polyFunderAddress: accountData.polyFunderAddress,
+        createdAt: Date.now(),
+      };
+
+      state.accounts.push(newAccount);
+      saveAccountsState(state);
+
+      logs.push({
+        id: `log-${Date.now()}`,
+        timestamp: Date.now(),
+        type: "info",
+        message: `Added live account: ${newAccount.name} (${address.slice(0, 6)}...${address.slice(-4)})`,
+      });
+
+      return {
+        success: true,
+        account: {
+          id: newAccount.id,
+          name: newAccount.name,
+          address: newAccount.address,
+          isActive: false,
+          lastUsedAt: undefined,
+        },
+      };
+    } catch (e: any) {
+      console.error("Error adding account:", e);
+      return { success: false, error: e.message };
     }
-
-    // Check if account with this address already exists
-    const existingAccount = state.accounts.find(
-      (acc) => acc.address.toLowerCase() === address.toLowerCase()
-    );
-    if (existingAccount) {
-      return { success: false, error: "Account with this address already exists" };
-    }
-
-    // Create new account
-    const newAccount: LiveAccount = {
-      id: `account-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: accountData.name || `Account ${state.accounts.length + 1}`,
-      address,
-      privateKey: accountData.privateKey.startsWith("0x")
-        ? accountData.privateKey.slice(2)
-        : accountData.privateKey,
-      polyApiKey: accountData.polyApiKey,
-      polyApiSecret: accountData.polyApiSecret,
-      polyPassphrase: accountData.polyPassphrase,
-      polyFunderAddress: accountData.polyFunderAddress,
-      createdAt: Date.now(),
-    };
-
-    state.accounts.push(newAccount);
-    saveAccountsState(state);
-
-    logs.push({
-      id: `log-${Date.now()}`,
-      timestamp: Date.now(),
-      type: "info",
-      message: `Added live account: ${newAccount.name} (${address.slice(0, 6)}...${address.slice(-4)})`,
-    });
-
-    return {
-      success: true,
-      account: {
-        id: newAccount.id,
-        name: newAccount.name,
-        address: newAccount.address,
-        isActive: false,
-        lastUsedAt: undefined,
-      },
-    };
-  } catch (e: any) {
-    console.error("Error adding account:", e);
-    return { success: false, error: e.message };
-  }
-});
+  },
+);
 
 // Remove an account
 ipcMain.handle("accounts:remove", async (_event, accountId: string) => {
   try {
     const state = loadAccountsState();
 
-    const accountIndex = state.accounts.findIndex((acc) => acc.id === accountId);
+    const accountIndex = state.accounts.findIndex(
+      (acc) => acc.id === accountId,
+    );
     if (accountIndex === -1) {
       return { success: false, error: "Account not found" };
     }
@@ -1498,81 +1530,89 @@ ipcMain.handle("accounts:markPaperPopupSeen", async () => {
 });
 
 // Update an existing account
-ipcMain.handle("accounts:update", async (_event, accountId: string, updates: {
-  name?: string;
-  privateKey?: string;
-  polyApiKey?: string;
-  polyApiSecret?: string;
-  polyPassphrase?: string;
-  polyFunderAddress?: string;
-}) => {
-  try {
-    const state = loadAccountsState();
+ipcMain.handle(
+  "accounts:update",
+  async (
+    _event,
+    accountId: string,
+    updates: {
+      name?: string;
+      privateKey?: string;
+      polyApiKey?: string;
+      polyApiSecret?: string;
+      polyPassphrase?: string;
+      polyFunderAddress?: string;
+    },
+  ) => {
+    try {
+      const state = loadAccountsState();
 
-    const account = state.accounts.find((acc) => acc.id === accountId);
-    if (!account) {
-      return { success: false, error: "Account not found" };
-    }
-
-    // Update fields
-    if (updates.name) account.name = updates.name;
-    if (updates.privateKey) {
-      account.privateKey = updates.privateKey.startsWith("0x")
-        ? updates.privateKey.slice(2)
-        : updates.privateKey;
-      // Re-derive address
-      const address = await deriveAddressFromPrivateKey(updates.privateKey);
-      if (address) account.address = address;
-    }
-    if (updates.polyApiKey) account.polyApiKey = updates.polyApiKey;
-    if (updates.polyApiSecret) account.polyApiSecret = updates.polyApiSecret;
-    if (updates.polyPassphrase) account.polyPassphrase = updates.polyPassphrase;
-    if (updates.polyFunderAddress !== undefined) {
-      account.polyFunderAddress = updates.polyFunderAddress || undefined;
-    }
-
-    saveAccountsState(state);
-
-    // If this is the active account, update .env file too
-    if (state.activeAccountId === accountId) {
-      const envFile = getEnvFilePath();
-      let content = "";
-      if (fs.existsSync(envFile)) {
-        content = fs.readFileSync(envFile, "utf-8");
+      const account = state.accounts.find((acc) => acc.id === accountId);
+      if (!account) {
+        return { success: false, error: "Account not found" };
       }
 
-      const updateEnvKey = (key: string, value: string) => {
-        const regex = new RegExp(`^${key}=.*$`, "m");
-        if (regex.test(content)) {
-          content = content.replace(regex, `${key}=${value}`);
-        } else {
-          content += `${content.endsWith("\n") || content === "" ? "" : "\n"}${key}=${value}\n`;
+      // Update fields
+      if (updates.name) account.name = updates.name;
+      if (updates.privateKey) {
+        account.privateKey = updates.privateKey.startsWith("0x")
+          ? updates.privateKey.slice(2)
+          : updates.privateKey;
+        // Re-derive address
+        const address = await deriveAddressFromPrivateKey(updates.privateKey);
+        if (address) account.address = address;
+      }
+      if (updates.polyApiKey) account.polyApiKey = updates.polyApiKey;
+      if (updates.polyApiSecret) account.polyApiSecret = updates.polyApiSecret;
+      if (updates.polyPassphrase)
+        account.polyPassphrase = updates.polyPassphrase;
+      if (updates.polyFunderAddress !== undefined) {
+        account.polyFunderAddress = updates.polyFunderAddress || undefined;
+      }
+
+      saveAccountsState(state);
+
+      // If this is the active account, update .env file too
+      if (state.activeAccountId === accountId) {
+        const envFile = getEnvFilePath();
+        let content = "";
+        if (fs.existsSync(envFile)) {
+          content = fs.readFileSync(envFile, "utf-8");
         }
-      };
 
-      updateEnvKey("PRIVATE_KEY", account.privateKey);
-      updateEnvKey("POLY_API_KEY", account.polyApiKey);
-      updateEnvKey("POLY_API_SECRET", account.polyApiSecret);
-      updateEnvKey("POLY_PASSPHRASE", account.polyPassphrase);
-      if (account.polyFunderAddress) {
-        updateEnvKey("POLY_FUNDER_ADDRESS", account.polyFunderAddress);
+        const updateEnvKey = (key: string, value: string) => {
+          const regex = new RegExp(`^${key}=.*$`, "m");
+          if (regex.test(content)) {
+            content = content.replace(regex, `${key}=${value}`);
+          } else {
+            content += `${content.endsWith("\n") || content === "" ? "" : "\n"}${key}=${value}\n`;
+          }
+        };
+
+        updateEnvKey("PRIVATE_KEY", account.privateKey);
+        updateEnvKey("POLY_API_KEY", account.polyApiKey);
+        updateEnvKey("POLY_API_SECRET", account.polyApiSecret);
+        updateEnvKey("POLY_PASSPHRASE", account.polyPassphrase);
+        if (account.polyFunderAddress) {
+          updateEnvKey("POLY_FUNDER_ADDRESS", account.polyFunderAddress);
+        }
+
+        fs.writeFileSync(envFile, content, "utf-8");
       }
 
-      fs.writeFileSync(envFile, content, "utf-8");
+      return {
+        success: true,
+        account: {
+          id: account.id,
+          name: account.name,
+          address: account.address,
+          isActive: account.id === state.activeAccountId,
+          lastUsedAt: account.lastUsedAt,
+        },
+      };
+    } catch (e: any) {
+      console.error("Error updating account:", e);
+      return { success: false, error: e.message };
     }
-
-    return {
-      success: true,
-      account: {
-        id: account.id,
-        name: account.name,
-        address: account.address,
-        isActive: account.id === state.activeAccountId,
-        lastUsedAt: account.lastUsedAt,
-      },
-    };
-  } catch (e: any) {
-    console.error("Error updating account:", e);
-    return { success: false, error: e.message };
-  }
-});
+  },
+);

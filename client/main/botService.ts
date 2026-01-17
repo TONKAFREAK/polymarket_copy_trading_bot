@@ -145,7 +145,7 @@ export class BotService {
   private log(
     level: "info" | "warn" | "error" | "debug",
     message: string,
-    details?: any
+    details?: any,
   ) {
     console.log(`[BotService] ${level}: ${message}`, details || "");
     this.emit({ type: "log", data: { level, message, details } });
@@ -259,7 +259,7 @@ export class BotService {
       await fs.promises.writeFile(
         statePath,
         JSON.stringify(this.state, null, 2),
-        "utf-8"
+        "utf-8",
       );
     } catch (e) {
       this.log("error", "Failed to save state", e);
@@ -290,8 +290,14 @@ export class BotService {
     this.state = this.loadState();
 
     // Log initial state
-    this.log("info", `Loaded configuration: ${this.config.targets?.length || 0} targets`);
-    this.log("debug", `Config: sizingMode=${this.config.trading?.sizingMode}, maxPerTrade=$${this.config.risk?.maxUsdPerTrade}`);
+    this.log(
+      "info",
+      `Loaded configuration: ${this.config.targets?.length || 0} targets`,
+    );
+    this.log(
+      "debug",
+      `Config: sizingMode=${this.config.trading?.sizingMode}, maxPerTrade=$${this.config.risk?.maxUsdPerTrade}`,
+    );
 
     // Determine trading mode from accounts state (takes priority over config)
     const accountsState = this.loadAccountsState();
@@ -308,10 +314,13 @@ export class BotService {
 
     this.stats.mode = this.tradingMode;
     this.log("info", `Trading mode: ${this.tradingMode.toUpperCase()}`);
-    
+
     // Log paper trading state
     if (this.tradingMode === "paper" && this.state) {
-      this.log("info", `Paper balance: $${this.state.currentBalance?.toFixed(2) || '10000.00'}`);
+      this.log(
+        "info",
+        `Paper balance: $${this.state.currentBalance?.toFixed(2) || "10000.00"}`,
+      );
       const posCount = Object.keys(this.state.positions || {}).length;
       this.log("debug", `Open positions: ${posCount}`);
     }
@@ -338,7 +347,7 @@ export class BotService {
 
     // Set up targets
     this.targets = new Set(
-      (this.config.targets || []).map((t) => t.toLowerCase())
+      (this.config.targets || []).map((t) => t.toLowerCase()),
     );
 
     if (this.targets.size === 0) {
@@ -450,7 +459,7 @@ export class BotService {
 
           this.log("info", "Subscribed to trades and orders_matched", {
             targets: Array.from(this.targets).map(
-              (w) => w.substring(0, 10) + "..."
+              (w) => w.substring(0, 10) + "...",
             ),
           });
 
@@ -465,16 +474,16 @@ export class BotService {
           if (this.messageCount % 100 === 0) {
             this.log(
               "debug",
-              `Polling stats: ${this.messageCount} messages received, ${this.targetTradeCount} target trades detected`
+              `Polling stats: ${this.messageCount} messages received, ${this.targetTradeCount} target trades detected`,
             );
             this.emit({ type: "status", data: this.stats });
           }
-          
+
           // Log every 10 messages at info level for visibility
           if (this.messageCount % 10 === 0) {
             this.log(
               "debug",
-              `WebSocket heartbeat: ${this.messageCount} msgs, ${this.targetTradeCount} target trades`
+              `WebSocket heartbeat: ${this.messageCount} msgs, ${this.targetTradeCount} target trades`,
             );
           }
 
@@ -530,7 +539,7 @@ export class BotService {
     // Exponential backoff with jitter: 100ms, 200ms, 400ms, 800ms... up to 5000ms
     const baseDelay = Math.min(
       this.RECONNECT_BASE_MS * Math.pow(2, this.reconnectAttempts),
-      this.RECONNECT_MAX_MS
+      this.RECONNECT_MAX_MS,
     );
     // Add 20% jitter to prevent thundering herd
     const jitter = baseDelay * 0.2 * Math.random();
@@ -539,7 +548,7 @@ export class BotService {
     this.reconnectAttempts++;
     this.log(
       "info",
-      `Scheduling reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`
+      `Scheduling reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`,
     );
 
     this.reconnectTimer = setTimeout(() => {
@@ -559,10 +568,10 @@ export class BotService {
     if (this.chartSnapshotTimer) {
       clearInterval(this.chartSnapshotTimer);
     }
-    
+
     // Record initial snapshot
     this.recordChartSnapshot();
-    
+
     // Record every 60 seconds
     this.chartSnapshotTimer = setInterval(() => {
       if (this.running) {
@@ -580,15 +589,15 @@ export class BotService {
       for (const pos of Object.values(positions) as any[]) {
         if (pos && pos.shares > 0 && pos.currentPrice !== undefined) {
           const currentValue = pos.shares * pos.currentPrice;
-          const costBasis = pos.totalCost || (pos.avgEntryPrice * pos.shares);
+          const costBasis = pos.totalCost || pos.avgEntryPrice * pos.shares;
           unrealizedPnl += currentValue - costBasis;
         }
       }
-      
+
       const realizedPnl = this.state?.stats?.totalRealizedPnl || 0;
       const totalPnl = realizedPnl + unrealizedPnl;
       const startingBalance = this.state?.startingBalance || 10000;
-      
+
       const snapshot = {
         timestamp: Date.now(),
         pnl: totalPnl,
@@ -596,7 +605,7 @@ export class BotService {
         unrealizedPnl,
         balance: startingBalance + totalPnl,
       };
-      
+
       // Load existing history
       const historyPath = path.join(this.dataDir, "chart-history.json");
       let chartHistory = { snapshots: [] as any[] };
@@ -607,21 +616,31 @@ export class BotService {
       } catch (e) {
         // Start fresh
       }
-      
+
       // Add new snapshot
       chartHistory.snapshots.push(snapshot);
-      
+
       // Keep last 10080 points (7 days at 1 min intervals)
       if (chartHistory.snapshots.length > 10080) {
         // Downsample older data
         const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-        const recentSnapshots = chartHistory.snapshots.filter((s: any) => s.timestamp >= oneDayAgo);
-        const oldSnapshots = chartHistory.snapshots.filter((s: any) => s.timestamp < oneDayAgo);
-        const downsampledOld = oldSnapshots.filter((_: any, i: number) => i % 5 === 0);
+        const recentSnapshots = chartHistory.snapshots.filter(
+          (s: any) => s.timestamp >= oneDayAgo,
+        );
+        const oldSnapshots = chartHistory.snapshots.filter(
+          (s: any) => s.timestamp < oneDayAgo,
+        );
+        const downsampledOld = oldSnapshots.filter(
+          (_: any, i: number) => i % 5 === 0,
+        );
         chartHistory.snapshots = [...downsampledOld, ...recentSnapshots];
       }
-      
-      fs.writeFileSync(historyPath, JSON.stringify(chartHistory, null, 2), "utf-8");
+
+      fs.writeFileSync(
+        historyPath,
+        JSON.stringify(chartHistory, null, 2),
+        "utf-8",
+      );
     } catch (e) {
       this.log("debug", "Failed to record chart snapshot", e);
     }
@@ -700,7 +719,7 @@ export class BotService {
       {
         market: signal.marketSlug,
         wallet: signal.targetWallet.substring(0, 10) + "...",
-      }
+      },
     );
 
     this.emit({ type: "trade-detected", data: signal });
@@ -712,7 +731,7 @@ export class BotService {
       // Dry run - just log, don't execute
       this.log(
         "info",
-        `[DRY-RUN] Would execute: ${signal.side} ${signal.size.toFixed(2)} ${signal.outcome}`
+        `[DRY-RUN] Would execute: ${signal.side} ${signal.size.toFixed(2)} ${signal.outcome}`,
       );
       this.emit({
         type: "trade-skipped",
@@ -747,7 +766,7 @@ export class BotService {
     if (shares < config.minOrderSize) {
       this.log(
         "info",
-        `Trade skipped: size ${shares.toFixed(2)} below minimum ${config.minOrderSize}`
+        `Trade skipped: size ${shares.toFixed(2)} below minimum ${config.minOrderSize}`,
       );
       this.emit({
         type: "trade-skipped",
@@ -770,7 +789,7 @@ export class BotService {
       if (cost + fees > this.state.currentBalance) {
         this.log(
           "warn",
-          `Insufficient balance: need $${(cost + fees).toFixed(2)}, have $${this.state.currentBalance.toFixed(2)}`
+          `Insufficient balance: need $${(cost + fees).toFixed(2)}, have $${this.state.currentBalance.toFixed(2)}`,
         );
         this.emit({
           type: "trade-skipped",
@@ -847,14 +866,14 @@ export class BotService {
           (this.state.stats.winningTrades || 0) + 1;
         this.state.stats.largestWin = Math.max(
           this.state.stats.largestWin || 0,
-          pnl
+          pnl,
         );
       } else if (pnl < 0) {
         this.state.stats.losingTrades =
           (this.state.stats.losingTrades || 0) + 1;
         this.state.stats.largestLoss = Math.min(
           this.state.stats.largestLoss || 0,
-          pnl
+          pnl,
         );
       }
     }
@@ -898,7 +917,7 @@ export class BotService {
         market: signal.marketSlug,
         cost: cost.toFixed(2),
         balance: this.state.currentBalance.toFixed(2),
-      }
+      },
     );
 
     this.emit({
@@ -958,7 +977,7 @@ export class BotService {
 
       if (!privateKey) {
         throw new Error(
-          "No private key configured. Set POLY_PRIVATE_KEY in environment."
+          "No private key configured. Set POLY_PRIVATE_KEY in environment.",
         );
       }
 
@@ -1008,7 +1027,7 @@ export class BotService {
       if (shares < config.minOrderSize) {
         this.log(
           "info",
-          `Trade skipped: size ${shares.toFixed(2)} below minimum ${config.minOrderSize}`
+          `Trade skipped: size ${shares.toFixed(2)} below minimum ${config.minOrderSize}`,
         );
         this.emit({
           type: "trade-skipped",
@@ -1030,7 +1049,7 @@ export class BotService {
 
       this.log(
         "info",
-        `Executing LIVE trade: ${signal.side} ${shares.toFixed(2)} ${signal.outcome} @ $${limitPrice.toFixed(4)}`
+        `Executing LIVE trade: ${signal.side} ${shares.toFixed(2)} ${signal.outcome} @ $${limitPrice.toFixed(4)}`,
       );
 
       // Place the order via CLOB client
@@ -1056,7 +1075,7 @@ export class BotService {
             orderId: orderResult.orderId,
             filledShares: orderResult.filledShares,
             latencyMs,
-          }
+          },
         );
 
         this.emit({
@@ -1128,7 +1147,10 @@ export class BotService {
       try {
         await this.initializeClobClient();
       } catch (e) {
-        this.log("warn", "Cannot fetch live stats - CLOB client not initialized");
+        this.log(
+          "warn",
+          "Cannot fetch live stats - CLOB client not initialized",
+        );
         return null;
       }
     }
@@ -1180,11 +1202,11 @@ export class BotService {
           tradesByAsset.set(assetId, []);
         }
         tradesByAsset.get(assetId)!.push(trade);
-        
+
         const size = parseFloat(trade.size) || 0;
         const price = parseFloat(trade.price) || 0;
         totalVolume += size * price;
-        
+
         const feeRate = parseFloat(trade.fee_rate_bps || "0") / 10000;
         totalFees += size * price * feeRate;
       }
@@ -1192,18 +1214,19 @@ export class BotService {
       // Calculate realized PnL from closed positions (FIFO)
       let realizedPnl = 0;
       for (const assetTrades of Array.from(tradesByAsset.values())) {
-        const sorted = assetTrades.sort((a: any, b: any) => 
-          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        const sorted = assetTrades.sort(
+          (a: any, b: any) =>
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
         );
-        
+
         let shares = 0;
         let costBasis = 0;
-        
+
         for (const trade of sorted) {
           const size = parseFloat(trade.size) || 0;
           const price = parseFloat(trade.price) || 0;
           const isBuy = trade.side === "BUY";
-          
+
           if (isBuy) {
             costBasis += size * price;
             shares += size;
@@ -1212,7 +1235,7 @@ export class BotService {
             const avgCost = shares > 0 ? costBasis / shares : 0;
             const pnl = (price - avgCost) * size;
             realizedPnl += pnl;
-            
+
             if (pnl > 0) {
               winningTrades++;
               totalWins += pnl;
@@ -1222,7 +1245,7 @@ export class BotService {
               totalLosses += Math.abs(pnl);
               largestLoss = Math.min(largestLoss, pnl);
             }
-            
+
             // Reduce cost basis proportionally
             const proportion = size / shares;
             costBasis -= costBasis * proportion;
@@ -1234,7 +1257,12 @@ export class BotService {
       const totalTrades = trades.length;
       const closedTrades = winningTrades + losingTrades;
       const winRate = closedTrades > 0 ? winningTrades / closedTrades : 0;
-      const profitFactor = totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? Infinity : 0;
+      const profitFactor =
+        totalLosses > 0
+          ? totalWins / totalLosses
+          : totalWins > 0
+            ? Infinity
+            : 0;
       const avgTradeSize = totalTrades > 0 ? totalVolume / totalTrades : 0;
 
       // Load starting balance from saved state if available
@@ -1242,14 +1270,24 @@ export class BotService {
       let startingBalance = balance + positionsValue;
       try {
         if (fs.existsSync(liveStatePath)) {
-          const savedState = JSON.parse(fs.readFileSync(liveStatePath, "utf-8"));
+          const savedState = JSON.parse(
+            fs.readFileSync(liveStatePath, "utf-8"),
+          );
           startingBalance = savedState.startingBalance || startingBalance;
         } else {
           // Save initial starting balance
-          fs.writeFileSync(liveStatePath, JSON.stringify({
-            startingBalance: balance + positionsValue,
-            createdAt: Date.now()
-          }, null, 2), "utf-8");
+          fs.writeFileSync(
+            liveStatePath,
+            JSON.stringify(
+              {
+                startingBalance: balance + positionsValue,
+                createdAt: Date.now(),
+              },
+              null,
+              2,
+            ),
+            "utf-8",
+          );
         }
       } catch (e) {
         // Ignore

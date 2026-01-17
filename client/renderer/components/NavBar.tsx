@@ -58,7 +58,10 @@ export default function NavBar({
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
         setIsDropdownOpen(false);
       }
     };
@@ -94,11 +97,14 @@ export default function NavBar({
 
       if (result?.success) {
         // Refresh trading mode
-        const modeInfo = await window.ipc?.invoke<TradingModeInfo>("accounts:getTradingMode");
+        const modeInfo = await window.ipc?.invoke<TradingModeInfo>(
+          "accounts:getTradingMode",
+        );
         if (modeInfo) setTradingMode(modeInfo);
 
         // Refresh accounts list
-        const accountsList = await window.ipc?.invoke<AccountInfo[]>("accounts:getAll");
+        const accountsList =
+          await window.ipc?.invoke<AccountInfo[]>("accounts:getAll");
         if (accountsList) setAccounts(accountsList);
 
         setIsDropdownOpen(false);
@@ -124,7 +130,7 @@ export default function NavBar({
       : "No Account";
 
   const displayBalance = isPaperMode
-    ? tradingMode?.paperBalance ?? 10000
+    ? (tradingMode?.paperBalance ?? 10000)
     : tradingMode?.liveBalance;
 
   return (
@@ -305,7 +311,9 @@ export default function NavBar({
                 </div>
               ) : (
                 <div className="w-4 h-4 bg-gradient-to-bl from-transparent via-slate-800 via-slate-600 to-transparent flex items-center justify-center text-[8px] font-bold">
-                  {tradingMode?.activeAccount?.address?.charAt(2).toUpperCase() || "?"}
+                  {tradingMode?.activeAccount?.address
+                    ?.charAt(2)
+                    .toUpperCase() || "?"}
                 </div>
               )}
               <span className="hidden sm:inline text-[10px] font-medium font-mono">
@@ -318,7 +326,11 @@ export default function NavBar({
                 stroke="currentColor"
                 strokeWidth={2}
               >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M19 9l-7 7-7-7"
+                />
               </svg>
             </button>
 
@@ -350,9 +362,12 @@ export default function NavBar({
                     </svg>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-white">Paper Trading</div>
+                    <div className="text-sm font-medium text-white">
+                      Paper Trading
+                    </div>
                     <div className="text-[10px] text-white/40">
-                      Simulated trading - ${tradingMode?.paperBalance?.toFixed(2) ?? "10,000.00"}
+                      Simulated trading - $
+                      {tradingMode?.paperBalance?.toFixed(2) ?? "10,000.00"}
                     </div>
                   </div>
                   {isPaperMode && (
@@ -400,7 +415,8 @@ export default function NavBar({
                         {account.name}
                       </div>
                       <div className="text-[10px] text-white/40 font-mono">
-                        {account.address.slice(0, 6)}...{account.address.slice(-4)}
+                        {account.address.slice(0, 6)}...
+                        {account.address.slice(-4)}
                       </div>
                     </div>
                     {account.isActive && (
@@ -444,8 +460,12 @@ export default function NavBar({
                       </svg>
                     </div>
                     <div className="flex-1">
-                      <div className="text-sm font-medium text-white/60">Add Account</div>
-                      <div className="text-[10px] text-white/30">Connect a live trading account</div>
+                      <div className="text-sm font-medium text-white/60">
+                        Add Account
+                      </div>
+                      <div className="text-[10px] text-white/30">
+                        Connect a live trading account
+                      </div>
                     </div>
                   </button>
                 </div>

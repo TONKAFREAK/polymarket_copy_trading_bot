@@ -3592,10 +3592,19 @@ function TraderCard({
           const history = pnlData
             .map((point: any) => {
               // Handle different possible response formats
-              const timestamp =
-                point.t || point.timestamp || point.time
-                  ? new Date(point.t || point.timestamp || point.time).getTime()
-                  : null;
+              let rawTs = point.t || point.timestamp || point.time;
+              let timestamp: number | null = null;
+              
+              if (rawTs) {
+                // If it's a number, check if it's seconds (< 1e12) or milliseconds
+                if (typeof rawTs === 'number') {
+                  timestamp = rawTs < 1e12 ? rawTs * 1000 : rawTs;
+                } else {
+                  // It's a string, parse it
+                  timestamp = new Date(rawTs).getTime();
+                }
+              }
+              
               const pnl =
                 point.p !== undefined
                   ? parseFloat(point.p)
@@ -3605,7 +3614,7 @@ function TraderCard({
                       ? parseFloat(point.value)
                       : null;
 
-              if (timestamp && pnl !== null && !isNaN(pnl)) {
+              if (timestamp && !isNaN(timestamp) && pnl !== null && !isNaN(pnl)) {
                 return { timestamp, pnl };
               }
               return null;
@@ -3678,6 +3687,8 @@ function TraderCard({
   // Filter history by timeframe - with smart fallback
   const getFilteredHistory = () => {
     if (pnlHistory.length === 0) return [];
+    if (selectedTimeframe === "all") return pnlHistory;
+    
     const now = Date.now();
     const cutoffs = {
       "1d": now - 24 * 60 * 60 * 1000,
@@ -3688,9 +3699,8 @@ function TraderCard({
     const cutoff = cutoffs[selectedTimeframe];
     const filtered = pnlHistory.filter((p) => p.timestamp >= cutoff);
 
-    // If filtered has less than 2 points, return all data instead
-    // This ensures we always show something meaningful
-    if (filtered.length < 2 && selectedTimeframe !== "all") {
+    // Only fallback to all data if we have NO points in the filtered range
+    if (filtered.length === 0) {
       return pnlHistory;
     }
     return filtered;
@@ -4046,10 +4056,15 @@ function TraderCard({
                 {formatCurrency(chartHover.pnl)}
               </span>
               <span className="text-white/40 ml-1.5">
-                {new Date(chartHover.timestamp).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                })}
+                {(() => {
+                  // Handle both seconds and milliseconds timestamps
+                  const ts = chartHover.timestamp < 1e12 ? chartHover.timestamp * 1000 : chartHover.timestamp;
+                  return new Date(ts).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  });
+                })()}
               </span>
             </div>
           )}

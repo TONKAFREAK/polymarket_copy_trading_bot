@@ -111,11 +111,21 @@ export class BotService {
   private seenTrades: Set<string> = new Set();
   private reconnectTimer: NodeJS.Timeout | null = null;
   private chartSnapshotTimer: NodeJS.Timeout | null = null;
+  private debugStatsTimer: NodeJS.Timeout | null = null;
+  private gcTimer: NodeJS.Timeout | null = null;
   private messageCount: number = 0;
   private targetTradeCount: number = 0;
 
-  // CLOB client for live trading
+  // CLOB client for live trading (full order placement)
   private clobClient: any = null;
+  // Live data client for fetching portfolio data (read-only)
+  private liveDataClient: any = null;
+  // Cache for live stats to prevent flickering
+  private liveStatsCache: {
+    data: any;
+    timestamp: number;
+  } | null = null;
+  private readonly LIVE_STATS_CACHE_TTL = 5000; // 5 seconds
 
   constructor(dataDir: string) {
     this.dataDir = dataDir;
@@ -137,8 +147,12 @@ export class BotService {
   }
 
   private emit(event: BotEvent) {
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send("bot:event", event);
+    try {
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send("bot:event", event);
+      }
+    } catch (err) {
+      // Ignore IPC errors - window may have been closed
     }
   }
 
@@ -154,7 +168,13 @@ export class BotService {
   // State save debouncing for performance
   private stateSaveTimer: NodeJS.Timeout | null = null;
   private stateDirty: boolean = false;
-  private readonly STATE_SAVE_DEBOUNCE_MS = 100;
+  private readonly STATE_SAVE_DEBOUNCE_MS = 500; // Increased from 100ms to reduce disk I/O
+
+  // Memory limits to prevent unbounded growth
+  private readonly MAX_TRADES = 500;
+  private readonly MAX_ERRORS = 50;
+  private readonly MAX_SEEN_TRADES = 500;
+  private readonly MAX_POSITIONS = 200;
 
   private loadConfig(): BotConfig {
     try {
@@ -189,7 +209,44 @@ export class BotService {
     try {
       const statePath = path.join(this.dataDir, "paper-state.json");
       if (fs.existsSync(statePath)) {
-        return JSON.parse(fs.readFileSync(statePath, "utf-8"));
+        const state = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+
+        // Trim trades array on load to prevent memory bloat
+        if (state.trades && state.trades.length > this.MAX_TRADES) {
+          state.trades = state.trades.slice(-this.MAX_TRADES);
+          this.log("info", `Trimmed trades on load: kept ${this.MAX_TRADES} most recent`);
+        }
+
+        // Clean up old closed positions (shares === 0)
+        if (state.positions) {
+          const posEntries = Object.entries(state.positions);
+          let removedCount = 0;
+          for (const [tokenId, pos] of posEntries) {
+            const p = pos as any;
+            if (p.shares <= 0 || p.settled) {
+              delete state.positions[tokenId];
+              removedCount++;
+            }
+          }
+          if (removedCount > 0) {
+            this.log("info", `Cleaned up ${removedCount} closed positions on load`);
+          }
+
+          // If still too many positions, keep only the most recent
+          const remainingPositions = Object.entries(state.positions);
+          if (remainingPositions.length > this.MAX_POSITIONS) {
+            // Sort by openedAt and keep most recent
+            const sorted = remainingPositions.sort((a, b) => {
+              const aTime = (a[1] as any).openedAt || 0;
+              const bTime = (b[1] as any).openedAt || 0;
+              return bTime - aTime;
+            });
+            state.positions = Object.fromEntries(sorted.slice(0, this.MAX_POSITIONS));
+            this.log("info", `Trimmed positions on load: kept ${this.MAX_POSITIONS} most recent`);
+          }
+        }
+
+        return state;
       }
     } catch (e) {
       this.log("error", "Failed to load state", e);
@@ -373,6 +430,12 @@ export class BotService {
     // Start chart snapshot timer (every 60 seconds)
     this.startChartSnapshotTimer();
 
+    // Start debug stats timer (every 5 minutes) to monitor for memory leaks
+    this.startDebugStatsTimer();
+
+    // Start periodic garbage collection timer (every 2 minutes)
+    this.startGCTimer();
+
     return true;
   }
 
@@ -387,38 +450,62 @@ export class BotService {
     this.running = false;
     this.stats.status = "stopped";
 
-    // Clear reconnect timer immediately
+    // Clear all timers immediately
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
 
-    // Clear chart snapshot timer
     if (this.chartSnapshotTimer) {
       clearInterval(this.chartSnapshotTimer);
       this.chartSnapshotTimer = null;
     }
 
-    // Disconnect WebSocket with force
-    if (this.wsClient) {
-      try {
-        // Unsubscribe first if possible
-        try {
-          this.wsClient.unsubscribe?.({ subscriptions: [] });
-        } catch (e) {
-          // Ignore
-        }
-        // Force disconnect
-        this.wsClient.disconnect?.();
-        this.wsClient.close?.();
-      } catch (e) {
-        // Ignore close errors
-      }
-      this.wsClient = null;
+    if (this.debugStatsTimer) {
+      clearInterval(this.debugStatsTimer);
+      this.debugStatsTimer = null;
     }
+
+    if (this.gcTimer) {
+      clearInterval(this.gcTimer);
+      this.gcTimer = null;
+    }
+
+    if (this.stateSaveTimer) {
+      clearTimeout(this.stateSaveTimer);
+      this.stateSaveTimer = null;
+    }
+
+    // Disconnect WebSocket with force and clear all references
+    await this.cleanupWebSocket();
+
+    // Clean up CLOB client
+    if (this.clobClient) {
+      try {
+        if (typeof this.clobClient.disconnect === 'function') {
+          await this.clobClient.disconnect();
+        }
+        if (typeof this.clobClient.close === 'function') {
+          this.clobClient.close();
+        }
+      } catch (e) {
+        // Ignore
+      }
+      this.clobClient = null;
+    }
+
+    // Clean up live data client
+    this.liveDataClient = null;
+    this.liveStatsCache = null;
 
     // Flush any pending state to disk
     await this.flushState();
+
+    // Clear in-memory caches
+    this.seenTrades.clear();
+    this.targets.clear();
+    this.messageCount = 0;
+    this.targetTradeCount = 0;
 
     this.connected = false;
     this.stats.connected = false;
@@ -427,11 +514,55 @@ export class BotService {
 
     this.log("info", "Bot service stopped successfully");
 
+    // Hint to GC
+    if (global.gc) {
+      setTimeout(() => global.gc?.(), 100);
+    }
+
     return true;
+  }
+
+  // Properly clean up WebSocket client and all its event handlers
+  private async cleanupWebSocket(): Promise<void> {
+    if (!this.wsClient) return;
+
+    try {
+      // Remove all event listeners first to prevent memory leaks
+      if (typeof this.wsClient.removeAllListeners === 'function') {
+        this.wsClient.removeAllListeners();
+      }
+
+      // Unsubscribe from all topics
+      try {
+        this.wsClient.unsubscribe?.({ subscriptions: [] });
+      } catch (e) {
+        // Ignore
+      }
+
+      // Disable auto-reconnect
+      if (this.wsClient.options) {
+        this.wsClient.options.autoReconnect = false;
+      }
+
+      // Force disconnect
+      if (typeof this.wsClient.disconnect === 'function') {
+        this.wsClient.disconnect();
+      }
+      if (typeof this.wsClient.close === 'function') {
+        this.wsClient.close();
+      }
+    } catch (e) {
+      // Ignore close errors
+    } finally {
+      this.wsClient = null;
+    }
   }
 
   private async connectWebSocket() {
     try {
+      // Clean up existing WebSocket client before creating a new one
+      await this.cleanupWebSocket();
+
       // Dynamically import the real-time data client
       const { RealTimeDataClient, ConnectionStatus } =
         await import("@polymarket/real-time-data-client");
@@ -442,67 +573,79 @@ export class BotService {
 
       this.wsClient = new RealTimeDataClient({
         onConnect: (client: any) => {
-          this.log("info", "WebSocket connected to Polymarket");
-          this.connected = true;
-          this.stats.connected = true;
-          this.messageCount = 0;
-          this.targetTradeCount = 0;
-          this.resetReconnectState(); // Reset backoff on successful connect
+          try {
+            this.log("info", "WebSocket connected to Polymarket");
+            this.connected = true;
+            this.stats.connected = true;
+            this.messageCount = 0;
+            this.targetTradeCount = 0;
+            this.resetReconnectState(); // Reset backoff on successful connect
 
-          // Subscribe to trades and orders_matched
-          client.subscribe({
-            subscriptions: [
-              { topic: "activity", type: "trades" },
-              { topic: "activity", type: "orders_matched" },
-            ],
-          });
+            // Subscribe to trades and orders_matched
+            client.subscribe({
+              subscriptions: [
+                { topic: "activity", type: "trades" },
+                { topic: "activity", type: "orders_matched" },
+              ],
+            });
 
-          this.log("info", "Subscribed to trades and orders_matched", {
-            targets: Array.from(this.targets).map(
-              (w) => w.substring(0, 10) + "...",
-            ),
-          });
+            this.log("info", "Subscribed to trades and orders_matched", {
+              targets: Array.from(this.targets).map(
+                (w) => w.substring(0, 10) + "...",
+              ),
+            });
 
-          this.emit({ type: "connected" });
-          this.emit({ type: "status", data: this.stats });
+            this.emit({ type: "connected" });
+            this.emit({ type: "status", data: this.stats });
+          } catch (err: any) {
+            this.log("error", `Error in onConnect: ${err.message}`);
+          }
         },
         onMessage: (_: any, message: any) => {
-          this.messageCount++;
-          this.stats.messagesReceived = this.messageCount;
+          try {
+            this.messageCount++;
+            this.stats.messagesReceived = this.messageCount;
 
-          // Log every 100 messages
-          if (this.messageCount % 100 === 0) {
-            this.log(
-              "debug",
-              `Polling stats: ${this.messageCount} messages received, ${this.targetTradeCount} target trades detected`,
-            );
-            this.emit({ type: "status", data: this.stats });
+            // Log every 100 messages
+            if (this.messageCount % 100 === 0) {
+              this.log(
+                "debug",
+                `Polling stats: ${this.messageCount} messages received, ${this.targetTradeCount} target trades detected`,
+              );
+              this.emit({ type: "status", data: this.stats });
+            }
+
+            // Log every 10 messages at info level for visibility
+            if (this.messageCount % 10 === 0) {
+              this.log(
+                "debug",
+                `WebSocket heartbeat: ${this.messageCount} msgs, ${this.targetTradeCount} target trades`,
+              );
+            }
+
+            this.handleMessage(message);
+          } catch (err: any) {
+            this.log("error", `Error processing message: ${err.message}`);
           }
-
-          // Log every 10 messages at info level for visibility
-          if (this.messageCount % 10 === 0) {
-            this.log(
-              "debug",
-              `WebSocket heartbeat: ${this.messageCount} msgs, ${this.targetTradeCount} target trades`,
-            );
-          }
-
-          this.handleMessage(message);
         },
         onStatusChange: (status: any) => {
-          this.log("debug", "WebSocket status change", { status });
+          try {
+            this.log("debug", "WebSocket status change", { status });
 
-          if (status === ConnectionStatus.DISCONNECTED) {
-            this.log("warn", "WebSocket disconnected");
-            this.connected = false;
-            this.stats.connected = false;
-            this.emit({ type: "disconnected" });
-            this.emit({ type: "status", data: this.stats });
+            if (status === ConnectionStatus.DISCONNECTED) {
+              this.log("warn", "WebSocket disconnected");
+              this.connected = false;
+              this.stats.connected = false;
+              this.emit({ type: "disconnected" });
+              this.emit({ type: "status", data: this.stats });
 
-            // Schedule reconnect
-            if (this.running) {
-              this.scheduleReconnect();
+              // Schedule reconnect
+              if (this.running) {
+                this.scheduleReconnect();
+              }
             }
+          } catch (err: any) {
+            this.log("error", `Error in onStatusChange: ${err.message}`);
           }
         },
         autoReconnect: true,
@@ -515,6 +658,10 @@ export class BotService {
         error: error.message,
       });
       this.stats.errors.push(error.message);
+      // Trim errors to prevent memory leak
+      if (this.stats.errors.length > this.MAX_ERRORS) {
+        this.stats.errors = this.stats.errors.slice(-this.MAX_ERRORS);
+      }
       this.emit({
         type: "error",
         data: { message: error.message, context: "websocket" },
@@ -563,7 +710,7 @@ export class BotService {
     this.reconnectAttempts = 0;
   }
 
-  // Start chart snapshot timer - records balance every 60 seconds
+  // Start chart snapshot timer - records balance periodically
   private startChartSnapshotTimer() {
     if (this.chartSnapshotTimer) {
       clearInterval(this.chartSnapshotTimer);
@@ -572,12 +719,143 @@ export class BotService {
     // Record initial snapshot
     this.recordChartSnapshot();
 
-    // Record every 60 seconds
+    // Record every 2 minutes (reduced from 1 minute to lower disk I/O)
     this.chartSnapshotTimer = setInterval(() => {
       if (this.running) {
         this.recordChartSnapshot();
       }
-    }, 60000); // 1 minute
+    }, 120000); // 2 minutes
+  }
+
+  // Start debug stats timer - logs memory and stats for crash debugging
+  private startDebugStatsTimer() {
+    if (this.debugStatsTimer) {
+      clearInterval(this.debugStatsTimer);
+    }
+
+    // Log every 10 minutes (reduced from 5 to lower disk I/O)
+    this.debugStatsTimer = setInterval(() => {
+      if (this.running) {
+        this.logDebugStats();
+      }
+    }, 600000); // 10 minutes
+  }
+
+  // Periodic garbage collection and memory cleanup
+  private startGCTimer() {
+    if (this.gcTimer) {
+      clearInterval(this.gcTimer);
+    }
+
+    // Run cleanup every 2 minutes
+    this.gcTimer = setInterval(() => {
+      if (this.running) {
+        this.performMemoryCleanup();
+      }
+    }, 120000); // 2 minutes
+  }
+
+  // Perform memory cleanup tasks
+  private performMemoryCleanup() {
+    try {
+      // Clean up seenTrades set
+      if (this.seenTrades.size > this.MAX_SEEN_TRADES) {
+        const arr = Array.from(this.seenTrades);
+        this.seenTrades = new Set(arr.slice(-Math.floor(this.MAX_SEEN_TRADES / 2)));
+        this.log("debug", `Cleaned seenTrades: ${arr.length} -> ${this.seenTrades.size}`);
+      }
+
+      // Clean up stats.errors
+      if (this.stats.errors.length > this.MAX_ERRORS) {
+        this.stats.errors = this.stats.errors.slice(-this.MAX_ERRORS);
+      }
+
+      // Clean up state trades if loaded
+      if (this.state && this.state.trades && this.state.trades.length > this.MAX_TRADES) {
+        this.state.trades = this.state.trades.slice(-this.MAX_TRADES);
+        this.log("debug", `Trimmed state.trades to ${this.MAX_TRADES}`);
+      }
+
+      // Clean up closed positions from state
+      if (this.state && this.state.positions) {
+        const posEntries = Object.entries(this.state.positions);
+        for (const [tokenId, pos] of posEntries) {
+          const p = pos as any;
+          if (p.shares <= 0 || p.settled) {
+            delete this.state.positions[tokenId];
+          }
+        }
+      }
+
+      // Clear live stats cache if stale
+      if (this.liveStatsCache && Date.now() - this.liveStatsCache.timestamp > 60000) {
+        this.liveStatsCache = null;
+      }
+
+      // Hint to GC if available (Node.js with --expose-gc flag)
+      if (global.gc) {
+        global.gc();
+        this.log("debug", "Triggered manual GC");
+      }
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+  }
+
+  // Log memory usage and stats for debugging
+  private logDebugStats() {
+    try {
+      const memUsage = process.memoryUsage();
+      const heapUsedMB = (memUsage.heapUsed / 1024 / 1024).toFixed(2);
+      const heapTotalMB = (memUsage.heapTotal / 1024 / 1024).toFixed(2);
+      const rssMB = (memUsage.rss / 1024 / 1024).toFixed(2);
+      const uptimeHours = this.stats.startTime
+        ? ((Date.now() - this.stats.startTime) / 1000 / 60 / 60).toFixed(2)
+        : "0";
+
+      const debugInfo = {
+        timestamp: new Date().toISOString(),
+        uptime: `${uptimeHours} hours`,
+        memory: {
+          heapUsed: `${heapUsedMB} MB`,
+          heapTotal: `${heapTotalMB} MB`,
+          rss: `${rssMB} MB`,
+        },
+        stats: {
+          messages: this.messageCount,
+          targetTrades: this.targetTradeCount,
+          tradesExecuted: this.stats.tradesExecuted,
+          errors: this.stats.errors.length,
+          seenTradesSize: this.seenTrades.size,
+          positionsCount: this.state ? Object.keys(this.state.positions || {}).length : 0,
+          tradesCount: this.state?.trades?.length || 0,
+        },
+        connected: this.connected,
+        mode: this.tradingMode,
+      };
+
+      // Write to debug log file
+      const debugLogPath = path.join(this.dataDir, "debug-stats.log");
+      const logLine = JSON.stringify(debugInfo) + "\n";
+      fs.appendFileSync(debugLogPath, logLine);
+
+      // Keep debug log file from growing too large (max 100KB)
+      try {
+        const stats = fs.statSync(debugLogPath);
+        if (stats.size > 100 * 1024) {
+          const content = fs.readFileSync(debugLogPath, "utf-8");
+          const lines = content.split("\n").filter(l => l.trim());
+          const recentLines = lines.slice(-50); // Keep last 50 entries
+          fs.writeFileSync(debugLogPath, recentLines.join("\n") + "\n");
+        }
+      } catch {
+        // Ignore
+      }
+
+      this.log("debug", `Memory: ${heapUsedMB}MB heap, ${rssMB}MB RSS | Uptime: ${uptimeHours}h | Msgs: ${this.messageCount}`);
+    } catch (e) {
+      // Ignore debug logging errors
+    }
   }
 
   // Record a chart snapshot
@@ -620,18 +898,19 @@ export class BotService {
       // Add new snapshot
       chartHistory.snapshots.push(snapshot);
 
-      // Keep last 10080 points (7 days at 1 min intervals)
-      if (chartHistory.snapshots.length > 10080) {
-        // Downsample older data
-        const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      // Keep last 5040 points (7 days at 2 min intervals) - reduced from 10080
+      if (chartHistory.snapshots.length > 5040) {
+        // Downsample older data more aggressively
+        const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
         const recentSnapshots = chartHistory.snapshots.filter(
-          (s: any) => s.timestamp >= oneDayAgo,
+          (s: any) => s.timestamp >= twelveHoursAgo,
         );
         const oldSnapshots = chartHistory.snapshots.filter(
-          (s: any) => s.timestamp < oneDayAgo,
+          (s: any) => s.timestamp < twelveHoursAgo,
         );
+        // Keep only every 10th old point (reduces 6 hours of data to ~18 points)
         const downsampledOld = oldSnapshots.filter(
-          (_: any, i: number) => i % 5 === 0,
+          (_: any, i: number) => i % 10 === 0,
         );
         chartHistory.snapshots = [...downsampledOld, ...recentSnapshots];
       }
@@ -651,10 +930,11 @@ export class BotService {
     type: string;
     payload: any;
   }) {
-    // Filter non-activity messages
-    if (message.topic !== "activity") {
-      return;
-    }
+    try {
+      // Filter non-activity messages
+      if (message.topic !== "activity") {
+        return;
+      }
 
     if (message.type !== "trades" && message.type !== "orders_matched") {
       return;
@@ -678,10 +958,10 @@ export class BotService {
     }
     this.seenTrades.add(tradeId);
 
-    // Clean up old trades periodically (keep last 1000)
-    if (this.seenTrades.size > 1000) {
+    // Clean up old trades more aggressively (keep last MAX_SEEN_TRADES/2)
+    if (this.seenTrades.size > this.MAX_SEEN_TRADES) {
       const arr = Array.from(this.seenTrades);
-      this.seenTrades = new Set(arr.slice(-500));
+      this.seenTrades = new Set(arr.slice(-Math.floor(this.MAX_SEEN_TRADES / 2)));
     }
 
     this.targetTradeCount++;
@@ -741,10 +1021,14 @@ export class BotService {
       // Paper trading
       this.executePaperTrade(signal);
     }
+    } catch (err: any) {
+      this.log("error", `Error handling message: ${err.message}`);
+    }
   }
 
   private executePaperTrade(signal: TradeSignal) {
-    if (!this.state || !this.config) return;
+    try {
+      if (!this.state || !this.config) return;
 
     // Calculate position size based on config
     let shares = signal.size;
@@ -856,6 +1140,11 @@ export class BotService {
       // Add to balance
       this.state.currentBalance += proceeds - fees;
 
+      // Clean up fully closed positions to prevent memory leak
+      if (existingPosition.shares <= 0) {
+        delete this.state.positions[tokenId];
+      }
+
       // Update stats
       if (!this.state.stats) this.state.stats = {};
       this.state.stats.totalRealizedPnl =
@@ -895,6 +1184,11 @@ export class BotService {
     };
 
     this.state.trades.push(trade);
+    // Trim trades array aggressively to prevent memory leak
+    if (this.state.trades.length > this.MAX_TRADES) {
+      // Keep only half when trimming to reduce frequency of trim operations
+      this.state.trades = this.state.trades.slice(-Math.floor(this.MAX_TRADES * 0.75));
+    }
 
     // Update stats
     if (!this.state.stats) this.state.stats = {};
@@ -933,6 +1227,13 @@ export class BotService {
       },
     });
     this.emit({ type: "status", data: this.stats });
+    } catch (err: any) {
+      this.log("error", `Error executing paper trade: ${err.message}`);
+      this.emit({
+        type: "trade-skipped",
+        data: { signal, reason: `Error: ${err.message}` },
+      });
+    }
   }
 
   getMode(): "paper" | "live" | "dry-run" {
@@ -958,27 +1259,82 @@ export class BotService {
   private async initializeClobClient(): Promise<void> {
     try {
       // Try to load the CLOB client from our src directory
-      const { ClobClientWrapper } = await import(
-        path.join(process.cwd(), "src", "polymarket", "clobClient")
-      );
+      // In production, it's relative to the app; in development, go up from client folder
+      const possiblePaths = [
+        path.join(process.cwd(), "..", "src", "polymarket", "clobClient"),
+        path.join(process.cwd(), "src", "polymarket", "clobClient"),
+        path.join(
+          __dirname,
+          "..",
+          "..",
+          "..",
+          "src",
+          "polymarket",
+          "clobClient",
+        ),
+      ];
 
-      // Load credentials from environment or config
-      const envPath = path.join(this.dataDir, ".env");
-      let privateKey = process.env.POLY_PRIVATE_KEY;
+      let ClobClientWrapper: any = null;
+      let loadedPath = "";
 
-      // Also check env file
-      if (!privateKey && fs.existsSync(envPath)) {
-        const envContent = fs.readFileSync(envPath, "utf-8");
-        const match = envContent.match(/POLY_PRIVATE_KEY=(.+)/);
-        if (match) {
-          privateKey = match[1].trim();
+      for (const modulePath of possiblePaths) {
+        try {
+          const module = await import(modulePath);
+          ClobClientWrapper = module.ClobClientWrapper;
+          loadedPath = modulePath;
+          break;
+        } catch {
+          // Try next path
+        }
+      }
+
+      if (!ClobClientWrapper) {
+        throw new Error(
+          `Cannot find clobClient module. Tried paths: ${possiblePaths.join(", ")}`,
+        );
+      }
+
+      this.log("info", `Loaded CLOB client from: ${loadedPath}`);
+
+      // Load credentials from active account in accounts.json (primary source for live trading)
+      const accountsState = this.loadAccountsState();
+      let privateKey: string | null = null;
+
+      if (accountsState.activeAccountId && accountsState.accounts) {
+        const activeAccount = accountsState.accounts.find(
+          (acc: any) => acc.id === accountsState.activeAccountId,
+        );
+        if (activeAccount && activeAccount.privateKey) {
+          privateKey = activeAccount.privateKey;
+          this.log(
+            "info",
+            `Using credentials from active account: ${activeAccount.name} (${activeAccount.address})`,
+          );
+        }
+      }
+
+      // Fallback to .env file if no active account found
+      if (!privateKey) {
+        const envPath = path.join(this.dataDir, ".env");
+        if (fs.existsSync(envPath)) {
+          const envContent = fs.readFileSync(envPath, "utf-8");
+          // Try PRIVATE_KEY first (used by account switching), then POLY_PRIVATE_KEY
+          let match = envContent.match(/PRIVATE_KEY=(.+)/);
+          if (match) {
+            privateKey = match[1].trim();
+          }
         }
       }
 
       if (!privateKey) {
         throw new Error(
-          "No private key configured. Set POLY_PRIVATE_KEY in environment.",
+          "No private key configured. Please add and select a live account in Settings.",
         );
+      }
+
+      // Ensure private key has 0x prefix
+      if (!privateKey.startsWith("0x")) {
+        privateKey = "0x" + privateKey;
       }
 
       this.clobClient = new ClobClientWrapper({
@@ -990,6 +1346,71 @@ export class BotService {
       this.log("info", "CLOB client initialized for live trading");
     } catch (e: any) {
       this.log("error", `Failed to initialize CLOB client: ${e.message}`);
+      throw e;
+    }
+  }
+
+  private async initializeLiveDataClient(): Promise<void> {
+    try {
+      // Import the LiveDataClient
+      const { LiveDataClient } = await import("./liveDataClient");
+
+      // Load the active account from accounts.json
+      const accountsPath = path.join(this.dataDir, "accounts.json");
+      let privateKey: string | null = null;
+      let walletAddress: string | null = null;
+
+      if (fs.existsSync(accountsPath)) {
+        try {
+          const accountsState = JSON.parse(
+            fs.readFileSync(accountsPath, "utf-8"),
+          );
+          if (accountsState.activeAccountId && accountsState.accounts) {
+            const activeAccount = accountsState.accounts.find(
+              (acc: any) => acc.id === accountsState.activeAccountId,
+            );
+            if (activeAccount) {
+              privateKey = activeAccount.privateKey;
+              walletAddress = activeAccount.address;
+              this.log(
+                "info",
+                `Found active account: ${activeAccount.name} (${walletAddress})`,
+              );
+            }
+          }
+        } catch (e) {
+          this.log("warn", "Failed to parse accounts.json");
+        }
+      }
+
+      // Fallback to .env file if no active account found
+      if (!privateKey && !walletAddress) {
+        const envPath = path.join(this.dataDir, ".env");
+        if (fs.existsSync(envPath)) {
+          const envContent = fs.readFileSync(envPath, "utf-8");
+          // Try PRIVATE_KEY first (used by account switching), then POLY_PRIVATE_KEY
+          let match = envContent.match(/PRIVATE_KEY=(.+)/);
+          if (match) {
+            privateKey = match[1].trim();
+          }
+        }
+      }
+
+      if (!privateKey && !walletAddress) {
+        throw new Error(
+          "No active account selected. Please add and select a live account in Settings.",
+        );
+      }
+
+      // Initialize with wallet address (preferred) since we already have it from the account
+      // This avoids needing to derive the address from the private key
+      this.liveDataClient = new LiveDataClient(walletAddress || privateKey!);
+      this.log(
+        "info",
+        `Live data client initialized for wallet: ${this.liveDataClient.getWalletAddress()}`,
+      );
+    } catch (e: any) {
+      this.log("error", `Failed to initialize live data client: ${e.message}`);
       throw e;
     }
   }
@@ -1103,6 +1524,10 @@ export class BotService {
       const latencyMs = Date.now() - startTime;
       this.log("error", `LIVE trade error: ${e.message}`, { latencyMs });
       this.stats.errors.push(e.message);
+      // Trim errors to prevent memory leak
+      if (this.stats.errors.length > this.MAX_ERRORS) {
+        this.stats.errors = this.stats.errors.slice(-this.MAX_ERRORS);
+      }
       this.emit({
         type: "error",
         data: { message: e.message, context: "live-trade" },
@@ -1140,33 +1565,48 @@ export class BotService {
     largestLoss: number;
     profitFactor: number;
     avgTradeSize: number;
+    trades?: any[];
   } | null> {
-    // Check if we have a clob client initialized
-    if (!this.clobClient) {
+    // Return cached data if still valid
+    if (
+      this.liveStatsCache &&
+      Date.now() - this.liveStatsCache.timestamp < this.LIVE_STATS_CACHE_TTL
+    ) {
+      return this.liveStatsCache.data;
+    }
+
+    // Check if we have a live data client initialized
+    if (!this.liveDataClient) {
       // Try to initialize it
       try {
-        await this.initializeClobClient();
+        await this.initializeLiveDataClient();
       } catch (e) {
         this.log(
           "warn",
-          "Cannot fetch live stats - CLOB client not initialized",
+          "Cannot fetch live stats - Live data client not initialized",
         );
+        // Return cached data even if expired, rather than null
+        if (this.liveStatsCache) {
+          return this.liveStatsCache.data;
+        }
         return null;
       }
     }
 
-    if (!this.clobClient) {
+    if (!this.liveDataClient) {
+      // Return cached data even if expired
+      if (this.liveStatsCache) {
+        return this.liveStatsCache.data;
+      }
       return null;
     }
 
     try {
-      // Get balance from Polymarket
-      const balances = await this.clobClient.getBalances();
-      const balance = parseFloat(balances.usdc) || 0;
-
-      // Get positions
-      const positionsData = await this.clobClient.getPositions();
-      const positions = positionsData.positions || [];
+      // Get all live data from Polymarket
+      const liveData = await this.liveDataClient.getLiveData();
+      const balance = liveData.balance || 0;
+      const positions = liveData.positions || [];
+      const trades = liveData.trades || [];
 
       // Calculate positions value and unrealized PnL
       let positionsValue = 0;
@@ -1179,10 +1619,6 @@ export class BotService {
           unrealizedPnl += (pos.currentValue || 0) - costBasis;
         }
       }
-
-      // Get trades for statistics
-      const tradesData = await this.clobClient.getTrades();
-      const trades = tradesData.trades || [];
 
       // Calculate trade statistics
       let totalVolume = 0;
@@ -1197,42 +1633,37 @@ export class BotService {
       // Group trades by asset to calculate realized PnL
       const tradesByAsset = new Map<string, any[]>();
       for (const trade of trades) {
-        const assetId = trade.asset_id;
+        const assetId = trade.tokenId;
         if (!tradesByAsset.has(assetId)) {
           tradesByAsset.set(assetId, []);
         }
         tradesByAsset.get(assetId)!.push(trade);
 
-        const size = parseFloat(trade.size) || 0;
-        const price = parseFloat(trade.price) || 0;
-        totalVolume += size * price;
-
-        const feeRate = parseFloat(trade.fee_rate_bps || "0") / 10000;
-        totalFees += size * price * feeRate;
+        totalVolume += trade.usdValue || 0;
+        totalFees += trade.fees || 0;
       }
 
       // Calculate realized PnL from closed positions (FIFO)
       let realizedPnl = 0;
       for (const assetTrades of Array.from(tradesByAsset.values())) {
         const sorted = assetTrades.sort(
-          (a: any, b: any) =>
-            new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+          (a: any, b: any) => a.timestamp - b.timestamp,
         );
 
         let shares = 0;
         let costBasis = 0;
 
         for (const trade of sorted) {
-          const size = parseFloat(trade.size) || 0;
-          const price = parseFloat(trade.price) || 0;
+          const size = trade.shares || 0;
+          const price = trade.price || 0;
           const isBuy = trade.side === "BUY";
 
           if (isBuy) {
             costBasis += size * price;
             shares += size;
-          } else {
+          } else if (shares > 0) {
             // Calculate realized PnL on sell
-            const avgCost = shares > 0 ? costBasis / shares : 0;
+            const avgCost = costBasis / shares;
             const pnl = (price - avgCost) * size;
             realizedPnl += pnl;
 
@@ -1247,7 +1678,7 @@ export class BotService {
             }
 
             // Reduce cost basis proportionally
-            const proportion = size / shares;
+            const proportion = Math.min(size / shares, 1);
             costBasis -= costBasis * proportion;
             shares -= size;
           }
@@ -1293,7 +1724,7 @@ export class BotService {
         // Ignore
       }
 
-      return {
+      const result = {
         balance,
         startingBalance,
         positions,
@@ -1309,9 +1740,22 @@ export class BotService {
         largestLoss,
         profitFactor,
         avgTradeSize,
+        trades,
       };
+
+      // Cache the result
+      this.liveStatsCache = {
+        data: result,
+        timestamp: Date.now(),
+      };
+
+      return result;
     } catch (e: any) {
       this.log("error", "Failed to fetch live stats", { error: e.message });
+      // Return cached data if available, even on error
+      if (this.liveStatsCache) {
+        return this.liveStatsCache.data;
+      }
       return null;
     }
   }

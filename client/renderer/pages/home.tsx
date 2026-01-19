@@ -589,8 +589,8 @@ export default function HomePage() {
         message,
         isNew: true,
       };
-      // Keep all logs (no limit)
-      return [newLog, ...prev];
+      // Keep last 100 realtime logs to prevent memory leak (reduced from 200)
+      return [newLog, ...prev].slice(0, 100);
     });
   };
 
@@ -603,8 +603,8 @@ export default function HomePage() {
         level,
         message,
       };
-      // Keep last 500 debug logs
-      return [newLog, ...prev].slice(0, 500);
+      // Keep last 200 debug logs (reduced from 500)
+      return [newLog, ...prev].slice(0, 200);
     });
   };
 
@@ -624,7 +624,8 @@ export default function HomePage() {
         targetTotal: signal.size * signal.price,
         isNew: true,
       };
-      return [newLog, ...prev];
+      // Keep last 100 realtime logs to prevent memory leak (reduced from 200)
+      return [newLog, ...prev].slice(0, 100);
     });
   };
 
@@ -649,7 +650,8 @@ export default function HomePage() {
         latencyMs,
         isNew: true,
       };
-      return [newLog, ...prev];
+      // Keep last 100 realtime logs to prevent memory leak (reduced from 200)
+      return [newLog, ...prev].slice(0, 100);
     });
   };
 
@@ -672,7 +674,8 @@ export default function HomePage() {
         message: reason,
         isNew: true,
       };
-      return [newLog, ...prev];
+      // Keep last 100 realtime logs to prevent memory leak (reduced from 200)
+      return [newLog, ...prev].slice(0, 100);
     });
   };
 

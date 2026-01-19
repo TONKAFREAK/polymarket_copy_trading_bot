@@ -134,7 +134,7 @@ export default function NavBar({
     : tradingMode?.liveBalance;
 
   return (
-    <nav className="relative z-[100] bg-black/30 border-b border-white/[0.06]">
+    <nav className="relative z-[100] bg-black/30 border-b-[1px] border-white/[0.06]">
       {/* Draggable title bar area */}
       <div
         className="flex items-center justify-between h-10 px-2"
@@ -162,17 +162,20 @@ export default function NavBar({
               </svg>
             </div>
             <span className="text-xs font-bold text-white/90 group-hover:text-white transition-colors">
-              PMcopy
+              PMcopy{" "}
+              <span className="text-[11px] font-light italic text-white/50 group-hover:text-white/70 transition-colors ml-1">
+                by Tonka
+              </span>
             </span>
           </a>
 
           {/* Status indicator */}
-          <div className="hidden sm:flex items-center gap-1.5 px-2 py-0.5 bg-white/[0.04] border border-white/[0.08]">
+          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-white/[0.04]">
             <span
-              className={`w-1.5 h-1.5 rounded-full transition-all duration-300 ${
+              className={`w-1.5 h-1.5 transition-all duration-300 ${
                 status?.running
                   ? "bg-emerald-500 animate-pulse shadow-lg shadow-emerald-500/50"
-                  : "bg-white/20"
+                  : "bg-white/30"
               }`}
             ></span>
             <span className="text-[10px] font-medium text-white/60">
@@ -182,14 +185,12 @@ export default function NavBar({
 
           {/* Connection status */}
           <div
-            className={`hidden sm:flex items-center gap-1.5 px-2 py-0.5 border transition-all duration-500 ${
-              status?.connected
-                ? "bg-emerald-500/10 border-emerald-500/30"
-                : "bg-white/[0.04] border-white/[0.08]"
+            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 transition-all duration-300 ${
+              status?.connected ? "bg-emerald-500/10" : "bg-white/[0.04]"
             }`}
           >
             <span
-              className={`w-1.5 h-1.5 rounded-full transition-all duration-300 ${
+              className={`w-1.5 h-1.5 transition-all duration-300 ${
                 status?.connected
                   ? "bg-emerald-500 shadow-lg shadow-emerald-500/50"
                   : status?.running
@@ -212,14 +213,12 @@ export default function NavBar({
 
           {/* Trading Mode Badge */}
           <div
-            className={`hidden sm:flex items-center gap-1.5 px-2 py-0.5 border transition-all duration-300 ${
-              isPaperMode
-                ? "bg-amber-500/10 border-amber-500/30"
-                : "bg-emerald-500/10 border-emerald-500/30"
+            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 transition-all duration-300 ${
+              isPaperMode ? "bg-amber-500/10" : "bg-emerald-500/10"
             }`}
           >
             <span
-              className={`w-1.5 h-1.5 rounded-full ${
+              className={`w-1.5 h-1.5 ${
                 isPaperMode ? "bg-amber-500" : "bg-emerald-500"
               }`}
             ></span>
@@ -241,10 +240,10 @@ export default function NavBar({
           {/* Start/Stop button */}
           <button
             onClick={onToggleBot}
-            className={`flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-medium transition-colors ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-semibold transition-all duration-200 border ${
               status?.running
-                ? "bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500/30"
-                : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30"
+                ? "bg-rose-500/15 text-rose-400 border-rose-500/30 hover:border-rose-500/50"
+                : "bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hover:border-emerald-500/50"
             }`}
           >
             {status?.running ? (
@@ -286,10 +285,10 @@ export default function NavBar({
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              className={`flex items-center gap-1.5 px-2 py-1 transition-colors rounded ${
+              className={`flex items-center gap-1.5 px-2 py-1 transition-colors ${
                 isDropdownOpen
                   ? "bg-white/10 text-white"
-                  : "text-white/50 hover:text-white hover:bg-white/5"
+                  : "text-white/50 hover:text-white"
               }`}
             >
               {/* Icon based on mode */}
@@ -336,17 +335,27 @@ export default function NavBar({
 
             {/* Dropdown Menu */}
             {isDropdownOpen && (
-              <div className="absolute right-0 top-full mt-1 w-64 bg-[#0f0f10] border border-white/10 rounded-lg shadow-xl overflow-hidden z-50">
+              <div className="absolute right-0 top-full mt-1 w-64 bg-[#111113] border border-white/[0.08] shadow-2xl overflow-hidden z-50 animate-dropdown">
+                {status?.running && (
+                  <div className="px-3 py-2 bg-rose-500/10 border-b border-white/5">
+                    <p className="text-[10px] text-rose-400 font-medium leading-tight">
+                      Bot is running. Please stop the bot to switch accounts or
+                      add new ones.
+                    </p>
+                  </div>
+                )}
+
                 {/* Paper Trading Option */}
                 <button
+                  disabled={status?.running}
                   onClick={() => handleAccountSwitch(null)}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${
                     isPaperMode
                       ? "bg-amber-500/10 border-l-2 border-amber-500"
-                      : "hover:bg-white/5 border-l-2 border-transparent"
+                      : `border-l-2 border-transparent ${status?.running ? "opacity-50 grayscale cursor-not-allowed" : "hover:border-white/20"}`
                   }`}
                 >
-                  <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                  <div className="w-8 h-8 bg-amber-500/20 flex items-center justify-center flex-shrink-0">
                     <svg
                       className="w-4 h-4 text-amber-400"
                       fill="none"
@@ -398,14 +407,15 @@ export default function NavBar({
                 {accounts.map((account) => (
                   <button
                     key={account.id}
+                    disabled={status?.running}
                     onClick={() => handleAccountSwitch(account.id)}
                     className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${
                       account.isActive
                         ? "bg-emerald-500/10 border-l-2 border-emerald-500"
-                        : "hover:bg-white/5 border-l-2 border-transparent"
+                        : `border-l-2 border-transparent ${status?.running ? "opacity-50 grayscale cursor-not-allowed" : "hover:border-white/20"}`
                     }`}
                   >
-                    <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                    <div className="w-8 h-8 bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
                       <span className="text-xs font-bold text-emerald-400">
                         {account.address.charAt(2).toUpperCase()}
                       </span>
@@ -438,13 +448,18 @@ export default function NavBar({
                 {/* Add Account Button */}
                 <div className="border-t border-white/10">
                   <button
+                    disabled={status?.running}
                     onClick={() => {
                       setIsDropdownOpen(false);
                       if (onAddWallet) onAddWallet();
                     }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-white/5 transition-colors"
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${
+                      status?.running
+                        ? "opacity-50 grayscale cursor-not-allowed"
+                        : "hover:border-l-2 hover:border-white/20"
+                    }`}
                   >
-                    <div className="w-8 h-8 rounded-full bg-white/5 border border-dashed border-white/20 flex items-center justify-center flex-shrink-0">
+                    <div className="w-8 h-8 bg-white/5 border border-dashed border-white/20 flex items-center justify-center flex-shrink-0">
                       <svg
                         className="w-4 h-4 text-white/40"
                         fill="none"

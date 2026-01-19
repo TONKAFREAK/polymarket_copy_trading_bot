@@ -7,6 +7,61 @@ import { getBotService, BotService } from "./botService";
 
 const isProd = process.env.NODE_ENV === "production";
 
+// ========== Global Error Handlers to Prevent Crashes ==========
+
+// Log file for crash debugging
+function getCrashLogPath(): string {
+  try {
+    const logDir = isProd
+      ? path.join(app.getPath("userData"), "logs")
+      : path.join(__dirname, "..", "..", "logs");
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+    return path.join(logDir, "crash.log");
+  } catch {
+    return "";
+  }
+}
+
+function logCrash(type: string, error: any): void {
+  try {
+    const logPath = getCrashLogPath();
+    if (!logPath) return;
+
+    const timestamp = new Date().toISOString();
+    const errorStr =
+      error instanceof Error
+        ? `${error.message}\n${error.stack}`
+        : String(error);
+    const logEntry = `[${timestamp}] ${type}: ${errorStr}\n\n`;
+
+    fs.appendFileSync(logPath, logEntry);
+    console.error(`[CRASH LOG] ${type}:`, error);
+  } catch {
+    // Ignore logging errors
+  }
+}
+
+// Catch uncaught exceptions - CRITICAL for preventing crashes
+process.on("uncaughtException", (error) => {
+  logCrash("UNCAUGHT_EXCEPTION", error);
+  // Don't exit - try to keep the app running
+});
+
+// Catch unhandled promise rejections
+process.on("unhandledRejection", (reason, promise) => {
+  logCrash("UNHANDLED_REJECTION", reason);
+  // Don't exit - try to keep the app running
+});
+
+// Log when the process is about to exit
+process.on("exit", (code) => {
+  logCrash("PROCESS_EXIT", `Exit code: ${code}`);
+});
+
+// ========== End Global Error Handlers ==========
+
 // Data directory will be set after app is ready
 let dataDir: string;
 
@@ -44,6 +99,15 @@ function getEnvFilePath(): string {
 // State tracking - now managed by BotService
 let startTime = Date.now();
 let logs: any[] = [];
+const MAX_LOGS = 200; // Maximum logs to keep in memory (reduced from 500)
+
+// Helper to add log with automatic trimming to prevent memory leaks
+function addLog(entry: any) {
+  logs.push(entry);
+  if (logs.length > MAX_LOGS) {
+    logs = logs.slice(-MAX_LOGS);
+  }
+}
 
 // Initialize bot service
 let botService: BotService;
@@ -57,9 +121,79 @@ interface MarketMeta {
   fetchedAt: number;
 }
 const marketMetaCache: Map<string, MarketMeta> = new Map();
+// Cache by token_id as well
+const tokenIdToMetaCache: Map<string, MarketMeta> = new Map();
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const MAX_CACHE_SIZE = 200; // Maximum cache entries to prevent memory leaks (reduced from 500)
 
-// Fetch market metadata from Polymarket Gamma API
+// Helper to add to cache with size limit (evicts oldest entries)
+function addToCache(
+  cache: Map<string, MarketMeta>,
+  key: string,
+  value: MarketMeta,
+) {
+  cache.set(key, value);
+  // Evict oldest entries if cache is too large
+  if (cache.size > MAX_CACHE_SIZE) {
+    const keysToDelete = Array.from(cache.keys()).slice(
+      0,
+      cache.size - MAX_CACHE_SIZE,
+    );
+    keysToDelete.forEach((k) => cache.delete(k));
+  }
+}
+
+// Fetch market metadata by token_id from Polymarket Gamma API
+async function fetchMarketMetaByTokenId(
+  tokenId: string,
+): Promise<MarketMeta | null> {
+  // Check cache first
+  const cached = tokenIdToMetaCache.get(tokenId);
+  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+    return cached;
+  }
+
+  try {
+    // Use clob_token_ids parameter to fetch by token ID
+    const response = await fetch(
+      `https://gamma-api.polymarket.com/markets?clob_token_ids=${tokenId}`,
+    );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const markets = await response.json();
+    if (markets && markets.length > 0) {
+      const market = markets[0];
+      const meta: MarketMeta = {
+        question:
+          market.question ||
+          market.groupItemTitle ||
+          market.title ||
+          market.slug,
+        image: market.image,
+        icon: market.icon,
+        title: market.title || market.groupItemTitle,
+        fetchedAt: Date.now(),
+      };
+
+      // Cache by both token_id and slug (with size limits)
+      addToCache(tokenIdToMetaCache, tokenId, meta);
+      if (market.slug) {
+        addToCache(marketMetaCache, market.slug, meta);
+      }
+
+      return meta;
+    }
+    return null;
+  } catch (e) {
+    console.error(`Failed to fetch market meta for token ${tokenId}:`, e);
+    return null;
+  }
+}
+
+// Fetch market metadata from Polymarket Gamma API by slug
 async function fetchMarketMeta(slug: string): Promise<MarketMeta | null> {
   // Check cache first
   const cached = marketMetaCache.get(slug);
@@ -87,7 +221,7 @@ async function fetchMarketMeta(slug: string): Promise<MarketMeta | null> {
             title: event.title,
             fetchedAt: Date.now(),
           };
-          marketMetaCache.set(slug, meta);
+          addToCache(marketMetaCache, slug, meta);
           return meta;
         }
       }
@@ -96,13 +230,14 @@ async function fetchMarketMeta(slug: string): Promise<MarketMeta | null> {
 
     const market = await response.json();
     const meta: MarketMeta = {
-      question: market.question || market.title || slug,
+      question:
+        market.question || market.groupItemTitle || market.title || slug,
       image: market.image,
       icon: market.icon,
-      title: market.title,
+      title: market.title || market.groupItemTitle,
       fetchedAt: Date.now(),
     };
-    marketMetaCache.set(slug, meta);
+    addToCache(marketMetaCache, slug, meta);
     return meta;
   } catch (e) {
     console.error(`Failed to fetch market meta for ${slug}:`, e);
@@ -110,13 +245,18 @@ async function fetchMarketMeta(slug: string): Promise<MarketMeta | null> {
   }
 }
 
-// Batch fetch market metadata for multiple slugs
-async function fetchMarketMetaBatch(slugs: string[]): Promise<void> {
-  const uniqueSlugs = Array.from(
-    new Set(slugs.filter((s) => s && s !== "unknown")),
+// Batch fetch market metadata for multiple slugs or token IDs
+async function fetchMarketMetaBatch(
+  slugsOrTokenIds: string[],
+  isTokenIds: boolean = false,
+): Promise<void> {
+  const unique = Array.from(
+    new Set(slugsOrTokenIds.filter((s) => s && s !== "unknown")),
   );
-  const unfetched = uniqueSlugs.filter((s) => {
-    const cached = marketMetaCache.get(s);
+
+  const cache = isTokenIds ? tokenIdToMetaCache : marketMetaCache;
+  const unfetched = unique.filter((s) => {
+    const cached = cache.get(s);
     return !cached || Date.now() - cached.fetchedAt > CACHE_TTL_MS;
   });
 
@@ -124,7 +264,8 @@ async function fetchMarketMetaBatch(slugs: string[]): Promise<void> {
   const batchSize = 5;
   for (let i = 0; i < unfetched.length; i += batchSize) {
     const batch = unfetched.slice(i, i + batchSize);
-    await Promise.all(batch.map((s) => fetchMarketMeta(s).catch(() => null)));
+    const fetchFn = isTokenIds ? fetchMarketMetaByTokenId : fetchMarketMeta;
+    await Promise.all(batch.map((s) => fetchFn(s).catch(() => null)));
   }
 }
 
@@ -158,6 +299,128 @@ function writeJsonFile(filename: string, data: any) {
   }
 }
 
+// Auto-detect and add account from .env file if valid credentials exist
+async function autoAddEnvAccount(): Promise<void> {
+  try {
+    const envFile = getEnvFilePath();
+    if (!fs.existsSync(envFile)) {
+      console.log("No .env file found, skipping auto-add account");
+      return;
+    }
+
+    const content = fs.readFileSync(envFile, "utf-8");
+
+    // Parse .env values
+    const getValue = (key: string): string | null => {
+      const match = content.match(new RegExp(`^${key}=([^\\n\\r]+)`, "m"));
+      return match ? match[1].trim() : null;
+    };
+
+    const privateKey = getValue("PRIVATE_KEY");
+    const polyApiKey = getValue("POLY_API_KEY");
+    const polyApiSecret = getValue("POLY_API_SECRET");
+    const polyPassphrase = getValue("POLY_PASSPHRASE");
+    const polyFunderAddress = getValue("POLY_FUNDER_ADDRESS");
+
+    // Check if we have valid credentials (not placeholder values)
+    if (
+      !privateKey ||
+      privateKey === "your_private_key_here_without_0x" ||
+      privateKey.length < 64
+    ) {
+      console.log("No valid private key in .env, skipping auto-add account");
+      return;
+    }
+
+    if (!polyApiKey || !polyApiSecret || !polyPassphrase) {
+      console.log(
+        "Missing Polymarket API credentials in .env, skipping auto-add account",
+      );
+      return;
+    }
+
+    // Derive wallet address from private key
+    const { ethers } = await import("ethers");
+    let pk = privateKey.trim();
+    if (!pk.startsWith("0x")) {
+      pk = "0x" + pk;
+    }
+
+    let address: string;
+    try {
+      const wallet = new ethers.Wallet(pk);
+      address = wallet.address;
+    } catch (e) {
+      console.error("Invalid private key in .env:", e);
+      return;
+    }
+
+    // Load current accounts state
+    const accountsState = readJsonFile("accounts.json", {
+      activeAccountId: null,
+      accounts: [],
+      hasSeenPaperPopup: false,
+    });
+
+    // Check if this account already exists (by address)
+    const existingAccount = accountsState.accounts.find(
+      (acc: any) => acc.address?.toLowerCase() === address.toLowerCase(),
+    );
+
+    if (existingAccount) {
+      console.log(
+        `Account ${address.slice(0, 8)}... already exists, skipping auto-add`,
+      );
+
+      // If no account is currently active and this one exists, activate it
+      if (accountsState.activeAccountId === null) {
+        accountsState.activeAccountId = existingAccount.id;
+
+        // Update config to live mode
+        const config = readJsonFile("config.json", {});
+        config.mode = "live";
+        writeJsonFile("config.json", config);
+        writeJsonFile("accounts.json", accountsState);
+
+        console.log(`Activated existing account: ${existingAccount.name}`);
+      }
+      return;
+    }
+
+    // Create new account from .env
+    const newAccount = {
+      id: `account-env-${Date.now()}`,
+      name: polyFunderAddress
+        ? `Wallet ${address.slice(0, 6)}...${address.slice(-4)}`
+        : `Primary Wallet`,
+      address,
+      privateKey: privateKey.startsWith("0x")
+        ? privateKey.slice(2)
+        : privateKey,
+      polyApiKey,
+      polyApiSecret,
+      polyPassphrase,
+      polyFunderAddress: polyFunderAddress || undefined,
+      createdAt: Date.now(),
+    };
+
+    accountsState.accounts.push(newAccount);
+    accountsState.activeAccountId = newAccount.id; // Auto-activate the account
+
+    // Update config to live mode
+    const config = readJsonFile("config.json", {});
+    config.mode = "live";
+    writeJsonFile("config.json", config);
+    writeJsonFile("accounts.json", accountsState);
+
+    console.log(
+      `Auto-added and activated account from .env: ${newAccount.name} (${address})`,
+    );
+  } catch (e) {
+    console.error("Error auto-adding account from .env:", e);
+  }
+}
+
 if (isProd) {
   serve({ directory: "app" });
 } else {
@@ -176,6 +439,9 @@ let mainWindow: BrowserWindow | null = null;
   // Initialize bot service with data directory
   botService = getBotService(dir);
 
+  // Auto-detect and add account from .env if credentials exist
+  await autoAddEnvAccount();
+
   mainWindow = createWindow("main", {
     width: 1400,
     height: 900,
@@ -192,6 +458,33 @@ let mainWindow: BrowserWindow | null = null;
   // Set the main window for bot service to send events
   botService.setMainWindow(mainWindow);
 
+  // Handle renderer process crashes
+  mainWindow.webContents.on("render-process-gone", (event, details) => {
+    logCrash(
+      "RENDERER_CRASH",
+      `Reason: ${details.reason}, exitCode: ${details.exitCode}`,
+    );
+    // Try to reload the window instead of closing
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.reload();
+    }
+  });
+
+  // Handle unresponsive renderer
+  mainWindow.on("unresponsive", () => {
+    logCrash("RENDERER_UNRESPONSIVE", "Window became unresponsive");
+  });
+
+  mainWindow.on("responsive", () => {
+    console.log("[Main] Window became responsive again");
+  });
+
+  // Handle window closed
+  mainWindow.on("closed", () => {
+    logCrash("WINDOW_CLOSED", "Main window was closed");
+    mainWindow = null;
+  });
+
   if (isProd) {
     await mainWindow.loadURL("app://./home");
   } else {
@@ -200,6 +493,19 @@ let mainWindow: BrowserWindow | null = null;
     mainWindow.webContents.openDevTools();
   }
 })();
+
+// Handle GPU process crashes
+app.on("gpu-process-crashed" as any, (event: any, killed: boolean) => {
+  logCrash("GPU_CRASH", `GPU process crashed. Killed: ${killed}`);
+});
+
+// Handle child process crashes
+app.on("child-process-gone", (event, details) => {
+  logCrash(
+    "CHILD_PROCESS_GONE",
+    `Type: ${details.type}, reason: ${details.reason}`,
+  );
+});
 
 app.on("window-all-closed", () => {
   app.quit();
@@ -327,7 +633,25 @@ ipcMain.handle("config:get", async () => {
 
 // Update configuration
 ipcMain.handle("config:set", async (_event, newConfig) => {
-  return writeJsonFile("config.json", newConfig);
+  console.log(
+    "[config:set] Saving config:",
+    JSON.stringify(newConfig, null, 2),
+  );
+  const success = writeJsonFile("config.json", newConfig);
+  console.log("[config:set] Save result:", success);
+
+  if (!success) {
+    throw new Error("Failed to save configuration");
+  }
+
+  // Verify the save by reading back
+  const savedConfig = readJsonFile("config.json", null);
+  console.log(
+    "[config:set] Verified saved config:",
+    JSON.stringify(savedConfig, null, 2),
+  );
+
+  return { success: true, config: savedConfig };
 });
 
 // Update specific config section
@@ -482,35 +806,53 @@ ipcMain.handle("portfolio:get", async () => {
     try {
       const liveData = await botService?.getLiveStats();
       if (liveData && liveData.positions) {
-        const positions = liveData.positions.map((pos: any) => ({
-          tokenId: pos.tokenId,
-          outcome: pos.outcome || "YES",
-          shares: pos.shares || 0,
-          avgEntryPrice: pos.avgEntryPrice || 0,
-          currentValue: pos.currentValue || 0,
-          currentPrice:
-            pos.shares > 0 ? pos.currentValue / pos.shares : pos.avgEntryPrice,
-          market: pos.market || "Unknown Market",
-          marketSlug: pos.marketSlug,
-          side: "BUY",
-          pnl: pos.currentValue - pos.avgEntryPrice * pos.shares,
-          pnlPercent:
-            pos.avgEntryPrice > 0
-              ? ((pos.currentValue / pos.shares - pos.avgEntryPrice) /
-                  pos.avgEntryPrice) *
-                100
-              : 0,
-          totalCost: pos.avgEntryPrice * pos.shares,
-          openedAt: Date.now(),
-          isResolved: pos.isResolved || false,
-          isRedeemable: pos.isRedeemable || false,
-          settled: false,
-          conditionId: pos.conditionId,
-          feesPaid: pos.feesPaid || 0,
-          image: pos.marketSlug
-            ? `https://polymarket-upload.s3.us-east-2.amazonaws.com/${pos.marketSlug}.png`
-            : undefined,
-        }));
+        // Fetch market metadata by token IDs
+        const tokenIds = liveData.positions
+          .map((pos: any) => pos.tokenId)
+          .filter(Boolean);
+        await fetchMarketMetaBatch(tokenIds, true);
+
+        const positions = liveData.positions.map((pos: any) => {
+          // Try to get metadata from token ID
+          const meta = pos.tokenId ? tokenIdToMetaCache.get(pos.tokenId) : null;
+          const marketName =
+            meta?.question || meta?.title || pos.market || "Unknown Market";
+          const imageUrl =
+            meta?.image ||
+            (pos.marketSlug
+              ? `https://polymarket-upload.s3.us-east-2.amazonaws.com/${pos.marketSlug}.png`
+              : undefined);
+
+          return {
+            tokenId: pos.tokenId,
+            outcome: pos.outcome || "YES",
+            shares: pos.shares || 0,
+            avgEntryPrice: pos.avgEntryPrice || 0,
+            currentValue: pos.currentValue || 0,
+            currentPrice:
+              pos.shares > 0
+                ? pos.currentValue / pos.shares
+                : pos.avgEntryPrice,
+            market: marketName,
+            marketSlug: pos.marketSlug,
+            side: "BUY",
+            pnl: pos.currentValue - pos.avgEntryPrice * pos.shares,
+            pnlPercent:
+              pos.avgEntryPrice > 0
+                ? ((pos.currentValue / pos.shares - pos.avgEntryPrice) /
+                    pos.avgEntryPrice) *
+                  100
+                : 0,
+            totalCost: pos.avgEntryPrice * pos.shares,
+            openedAt: Date.now(),
+            isResolved: pos.isResolved || false,
+            isRedeemable: pos.isRedeemable || false,
+            settled: false,
+            conditionId: pos.conditionId,
+            feesPaid: pos.feesPaid || 0,
+            image: imageUrl,
+          };
+        });
 
         // Filter to show only positions with shares > 0
         const activePositions = positions.filter((p: any) => p.shares > 0);
@@ -526,11 +868,17 @@ ipcMain.handle("portfolio:get", async () => {
   const paperState = readJsonFile("paper-state.json", { positions: {} });
   const positionEntries = Object.entries(paperState.positions || {});
 
-  // Collect all market slugs and fetch metadata in batch
+  // Collect all market slugs and token IDs to fetch metadata
   const slugs = positionEntries
     .map(([_, pos]: [string, any]) => pos.marketSlug)
     .filter(Boolean);
+  const tokenIds = positionEntries
+    .map(([tokenId, _]: [string, any]) => tokenId)
+    .filter(Boolean);
+
+  // Try to fetch by slug first, then by token ID for any missing
   await fetchMarketMetaBatch(slugs);
+  await fetchMarketMetaBatch(tokenIds, true);
 
   const positions = positionEntries.map(([tokenId, pos]: [string, any]) => {
     const currentPrice = pos.currentPrice || pos.avgEntryPrice;
@@ -541,8 +889,10 @@ ipcMain.handle("portfolio:get", async () => {
       : currentValue - entryValue;
     const pnlPercent = entryValue > 0 ? (pnl / entryValue) * 100 : 0;
 
-    // Get cached market metadata
-    const meta = pos.marketSlug ? marketMetaCache.get(pos.marketSlug) : null;
+    // Get cached market metadata - try slug first, then token ID
+    const meta =
+      (pos.marketSlug ? marketMetaCache.get(pos.marketSlug) : null) ||
+      tokenIdToMetaCache.get(tokenId);
 
     // Use image from cache or generate from slug
     const imageUrl =
@@ -593,15 +943,73 @@ ipcMain.handle("portfolio:get", async () => {
 
 // Get trade history
 ipcMain.handle("trades:get", async () => {
+  // Determine mode from accounts state
+  const accountsState = loadAccountsState();
+  const mode = accountsState.activeAccountId ? "live" : "paper";
+
+  // For LIVE mode, fetch real trades from Polymarket
+  if (mode === "live") {
+    try {
+      const liveData = await botService?.getLiveStats();
+      if (liveData && liveData.trades) {
+        // Collect all token IDs to fetch metadata
+        const tokenIds = liveData.trades
+          .map((t: any) => t.tokenId)
+          .filter(Boolean);
+        await fetchMarketMetaBatch(tokenIds, true);
+
+        const trades = liveData.trades.map((t: any, idx: number) => {
+          const meta = t.tokenId ? tokenIdToMetaCache.get(t.tokenId) : null;
+          const marketName =
+            meta?.question || meta?.title || t.market || "Unknown Market";
+          const imageUrl = meta?.image || undefined;
+
+          return {
+            id: t.id || `trade-${idx}`,
+            timestamp: t.timestamp,
+            tokenId: t.tokenId,
+            marketSlug: t.marketSlug,
+            market: marketName,
+            outcome: t.outcome,
+            side: t.side,
+            price: t.price,
+            shares: t.shares,
+            usdValue: t.usdValue,
+            fees: t.fees,
+            pnl: t.pnl,
+            targetWallet: t.targetWallet,
+            tradeId: t.tradeId,
+            image: imageUrl,
+          };
+        });
+
+        // Sort by timestamp descending (newest first)
+        trades.sort((a: any, b: any) => b.timestamp - a.timestamp);
+        return { trades };
+      }
+    } catch (e) {
+      console.error("Failed to fetch live trades:", e);
+      // Fall through to paper trades
+    }
+  }
+
+  // Paper mode: use local state
   const paperState = readJsonFile("paper-state.json", { trades: [] });
   const rawTrades = paperState.trades || [];
 
-  // Collect all market slugs and fetch metadata in batch
+  // Collect all market slugs and token IDs to fetch metadata
   const slugs = rawTrades.map((t: any) => t.marketSlug).filter(Boolean);
+  const tokenIds = rawTrades.map((t: any) => t.tokenId).filter(Boolean);
+
+  // Fetch by slug first, then by token ID for missing entries
   await fetchMarketMetaBatch(slugs);
+  await fetchMarketMetaBatch(tokenIds, true);
 
   const trades = rawTrades.map((t: any, idx: number) => {
-    const meta = t.marketSlug ? marketMetaCache.get(t.marketSlug) : null;
+    // Try to get metadata from slug first, then from token ID
+    const meta =
+      (t.marketSlug ? marketMetaCache.get(t.marketSlug) : null) ||
+      (t.tokenId ? tokenIdToMetaCache.get(t.tokenId) : null);
     const marketName =
       meta?.question || meta?.title || t.marketSlug || "Unknown Market";
     const imageUrl =
@@ -637,6 +1045,120 @@ ipcMain.handle("trades:get", async () => {
 
 // Get performance stats
 ipcMain.handle("performance:get", async () => {
+  // Determine mode from accounts state
+  const accountsState = loadAccountsState();
+  const mode = accountsState.activeAccountId ? "live" : "paper";
+
+  // For LIVE mode, calculate performance from live data
+  if (mode === "live") {
+    try {
+      const liveData = await botService?.getLiveStats();
+      if (liveData) {
+        const trades = liveData.trades || [];
+        const positions = liveData.positions || [];
+
+        // Calculate performance metrics from live data
+        const closedTrades = trades.filter((t: any) => t.pnl !== undefined);
+        const winningTrades = closedTrades.filter((t: any) => t.pnl > 0);
+        const losingTrades = closedTrades.filter((t: any) => t.pnl < 0);
+
+        const totalWins = winningTrades.reduce(
+          (sum: number, t: any) => sum + t.pnl,
+          0,
+        );
+        const totalLosses = Math.abs(
+          losingTrades.reduce((sum: number, t: any) => sum + t.pnl, 0),
+        );
+
+        const avgWin =
+          winningTrades.length > 0 ? totalWins / winningTrades.length : 0;
+        const avgLoss =
+          losingTrades.length > 0 ? totalLosses / losingTrades.length : 0;
+
+        const largestWin =
+          winningTrades.length > 0
+            ? Math.max(...winningTrades.map((t: any) => t.pnl))
+            : 0;
+        const largestLoss =
+          losingTrades.length > 0
+            ? Math.min(...losingTrades.map((t: any) => t.pnl))
+            : 0;
+
+        const totalVolume = trades.reduce(
+          (sum: number, t: any) => sum + (t.usdValue || 0),
+          0,
+        );
+        const totalFees = trades.reduce(
+          (sum: number, t: any) => sum + (t.fees || 0),
+          0,
+        );
+
+        // Calculate unrealized PnL from positions
+        const unrealizedPnl = positions.reduce((sum: number, pos: any) => {
+          const currentValue =
+            pos.currentValue ||
+            pos.shares * (pos.currentPrice || pos.avgEntryPrice);
+          const entryValue = pos.avgEntryPrice * pos.shares;
+          return sum + (currentValue - entryValue);
+        }, 0);
+
+        // Get balance from live data
+        const currentBalance = liveData.balance || 0;
+        const positionsValue = positions.reduce((sum: number, pos: any) => {
+          return (
+            sum +
+            (pos.currentValue ||
+              pos.shares * (pos.currentPrice || pos.avgEntryPrice))
+          );
+        }, 0);
+
+        // Estimate starting balance (current balance + positions value - unrealized PnL - realized PnL)
+        const realizedPnl = totalWins - totalLosses;
+        const totalPnl = realizedPnl + unrealizedPnl;
+        const startingBalance = currentBalance + positionsValue - totalPnl;
+        const returns =
+          startingBalance > 0
+            ? ((currentBalance + positionsValue - startingBalance) /
+                startingBalance) *
+              100
+            : 0;
+
+        return {
+          totalTrades: trades.length,
+          winningTrades: winningTrades.length,
+          losingTrades: losingTrades.length,
+          winRate:
+            closedTrades.length > 0
+              ? winningTrades.length / closedTrades.length
+              : 0,
+          totalPnl,
+          realizedPnl,
+          unrealizedPnl,
+          largestWin,
+          largestLoss,
+          profitFactor:
+            totalLosses > 0
+              ? totalWins / totalLosses
+              : totalWins > 0
+                ? Infinity
+                : 0,
+          avgWin,
+          avgLoss,
+          avgTradeSize: trades.length > 0 ? totalVolume / trades.length : 0,
+          totalVolume,
+          totalFees,
+          startingBalance,
+          currentBalance: currentBalance + positionsValue,
+          returns,
+        };
+      }
+    } catch (e) {
+      console.error("Failed to fetch live performance:", e);
+      // Fall through to paper performance
+    }
+  }
+
+  // Paper mode: use local state
   const paperState = readJsonFile("paper-state.json", {
     trades: [],
     stats: {},
@@ -716,12 +1238,134 @@ ipcMain.handle("performance:get", async () => {
 
 // Get chart history data (periodic balance snapshots)
 ipcMain.handle("chart:getHistory", async () => {
+  // Determine mode from accounts state
+  const accountsState = loadAccountsState();
+  const mode = accountsState.activeAccountId ? "live" : "paper";
+
+  // For LIVE mode, use live-chart-history.json
+  if (mode === "live") {
+    const chartHistory = readJsonFile("live-chart-history.json", {
+      snapshots: [],
+    });
+
+    // If no history, try to generate initial point from current data
+    if (!chartHistory.snapshots || chartHistory.snapshots.length === 0) {
+      try {
+        const liveData = await botService?.getLiveStats();
+        if (liveData) {
+          const positions = liveData.positions || [];
+          const balance = liveData.balance || 0;
+          const positionsValue = positions.reduce((sum: number, pos: any) => {
+            return (
+              sum +
+              (pos.currentValue ||
+                pos.shares * (pos.currentPrice || pos.avgEntryPrice))
+            );
+          }, 0);
+
+          // Create initial snapshot
+          const initialSnapshot = {
+            timestamp: Date.now(),
+            pnl: 0,
+            realizedPnl: 0,
+            unrealizedPnl: 0,
+            balance: balance + positionsValue,
+          };
+          return [initialSnapshot];
+        }
+      } catch (e) {
+        console.error("Failed to generate initial live chart point:", e);
+      }
+    }
+
+    return chartHistory.snapshots || [];
+  }
+
+  // Paper mode: use paper chart history
   const chartHistory = readJsonFile("chart-history.json", { snapshots: [] });
   return chartHistory.snapshots || [];
 });
 
 // Record a chart snapshot (called periodically by the bot)
 ipcMain.handle("chart:recordSnapshot", async () => {
+  // Determine mode from accounts state
+  const accountsState = loadAccountsState();
+  const mode = accountsState.activeAccountId ? "live" : "paper";
+
+  // For LIVE mode, record to live-chart-history.json
+  if (mode === "live") {
+    try {
+      const liveData = await botService?.getLiveStats();
+      if (liveData) {
+        const positions = liveData.positions || [];
+        const trades = liveData.trades || [];
+        const balance = liveData.balance || 0;
+
+        // Calculate unrealized PnL from positions
+        const unrealizedPnl = positions.reduce((sum: number, pos: any) => {
+          const currentValue =
+            pos.currentValue ||
+            pos.shares * (pos.currentPrice || pos.avgEntryPrice);
+          const entryValue = pos.avgEntryPrice * pos.shares;
+          return sum + (currentValue - entryValue);
+        }, 0);
+
+        // Calculate realized PnL from trades
+        const closedTrades = trades.filter((t: any) => t.pnl !== undefined);
+        const realizedPnl = closedTrades.reduce(
+          (sum: number, t: any) => sum + (t.pnl || 0),
+          0,
+        );
+
+        const positionsValue = positions.reduce((sum: number, pos: any) => {
+          return (
+            sum +
+            (pos.currentValue ||
+              pos.shares * (pos.currentPrice || pos.avgEntryPrice))
+          );
+        }, 0);
+
+        const totalPnl = realizedPnl + unrealizedPnl;
+
+        const snapshot = {
+          timestamp: Date.now(),
+          pnl: totalPnl,
+          realizedPnl,
+          unrealizedPnl,
+          balance: balance + positionsValue,
+        };
+
+        // Load existing live history
+        const chartHistory = readJsonFile("live-chart-history.json", {
+          snapshots: [],
+        });
+
+        // Add new snapshot (keep last 10080 points = 7 days at 1 min intervals)
+        chartHistory.snapshots.push(snapshot);
+        if (chartHistory.snapshots.length > 10080) {
+          const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+          const recentSnapshots = chartHistory.snapshots.filter(
+            (s: any) => s.timestamp >= oneDayAgo,
+          );
+          const oldSnapshots = chartHistory.snapshots.filter(
+            (s: any) => s.timestamp < oneDayAgo,
+          );
+          const downsampledOld = oldSnapshots.filter(
+            (_: any, i: number) => i % 5 === 0,
+          );
+          chartHistory.snapshots = [...downsampledOld, ...recentSnapshots];
+        }
+
+        writeJsonFile("live-chart-history.json", chartHistory);
+        return snapshot;
+      }
+    } catch (e) {
+      console.error("Failed to record live chart snapshot:", e);
+      // Fall through to paper
+    }
+  }
+
+  // Paper mode: use local paper state
   const paperState = readJsonFile("paper-state.json", {
     startingBalance: 10000,
     currentBalance: 10000,
@@ -853,7 +1497,7 @@ ipcMain.handle("position:sell", async (_event, tokenId: string) => {
   writeJsonFile("paper-state.json", paperState);
 
   // Add log entry
-  logs.push({
+  addLog({
     id: `log-${Date.now()}`,
     timestamp: Date.now(),
     type: pnl >= 0 ? "profit" : "loss",
@@ -892,7 +1536,7 @@ ipcMain.handle("logs:get", async () => {
         const lines = content
           .split("\n")
           .filter((l) => l.trim())
-          .slice(-100);
+          .slice(-50); // Reduced from 100 to 50
         lines.forEach((line, idx) => {
           try {
             const parsed = JSON.parse(line);
@@ -920,21 +1564,183 @@ ipcMain.handle("logs:get", async () => {
     console.error("Error reading logs:", e);
   }
 
-  // Combine with in-memory logs
-  return { logs: [...logs, ...recentLogs].slice(-200) };
+  // Combine with in-memory logs (reduced from 200 to 100)
+  return { logs: [...logs, ...recentLogs].slice(-100) };
 });
 
 // Add log entry
 ipcMain.handle("logs:add", async (_event, entry) => {
-  logs.push({
+  addLog({
     id: `log-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     timestamp: Date.now(),
     ...entry,
   });
-  // Keep only last 500 logs in memory
-  if (logs.length > 500) logs = logs.slice(-500);
+  // Keep only last MAX_LOGS in memory
+  if (logs.length > MAX_LOGS) logs = logs.slice(-MAX_LOGS);
   return true;
 });
+
+// ========== Polymarket API Proxies (bypass CORS) ==========
+
+// Fetch profile from gamma-api (CORS-free from main process)
+ipcMain.handle("polymarket:getProfile", async (_event, address: string) => {
+  try {
+    const response = await fetch(
+      `https://gamma-api.polymarket.com/public-profile?address=${address}`,
+      {
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+      },
+    );
+    if (!response.ok) {
+      return null;
+    }
+    return await response.json();
+  } catch (error) {
+    console.error("Failed to fetch profile:", error);
+    return null;
+  }
+});
+
+// Batch fetch profiles (more efficient)
+ipcMain.handle(
+  "polymarket:getProfiles",
+  async (_event, addresses: string[]) => {
+    const results: Record<string, any> = {};
+
+    // Fetch in parallel with rate limiting (max 10 concurrent)
+    const batchSize = 10;
+    for (let i = 0; i < addresses.length; i += batchSize) {
+      const batch = addresses.slice(i, i + batchSize);
+      const promises = batch.map(async (address) => {
+        try {
+          const response = await fetch(
+            `https://gamma-api.polymarket.com/public-profile?address=${address}`,
+            {
+              headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+              },
+            },
+          );
+          if (response.ok) {
+            results[address.toLowerCase()] = await response.json();
+          }
+        } catch {
+          // Ignore individual errors
+        }
+      });
+      await Promise.all(promises);
+    }
+
+    return results;
+  },
+);
+
+// Fetch available tags from gamma-api
+ipcMain.handle("polymarket:getTags", async () => {
+  try {
+    const response = await fetch(
+      "https://gamma-api.polymarket.com/tags?limit=100",
+      {
+        headers: {
+          Accept: "application/json",
+        },
+      },
+    );
+    if (!response.ok) {
+      return [];
+    }
+    return await response.json();
+  } catch (error) {
+    console.error("Failed to fetch tags:", error);
+    return [];
+  }
+});
+
+// Fetch trades for a user (CORS-free)
+ipcMain.handle(
+  "polymarket:getTrades",
+  async (_event, address: string, limit: number = 500) => {
+    try {
+      const response = await fetch(
+        `https://data-api.polymarket.com/trades?user=${address}&limit=${limit}`,
+        {
+          headers: {
+            Accept: "application/json",
+          },
+        },
+      );
+      if (!response.ok) {
+        return [];
+      }
+      return await response.json();
+    } catch (error) {
+      console.error("Failed to fetch trades:", error);
+      return [];
+    }
+  },
+);
+
+// Fetch leaderboard from data-api (CORS-free)
+// API: https://data-api.polymarket.com/v1/leaderboard
+// Params: category (OVERALL, POLITICS, SPORTS, CRYPTO, CULTURE, etc.)
+//         timePeriod (DAY, WEEK, MONTH, ALL)
+//         orderBy (PNL, VOL)
+//         limit (1-50)
+ipcMain.handle(
+  "polymarket:getLeaderboard",
+  async (
+    _event,
+    options: {
+      category?: string;
+      timePeriod?: string;
+      orderBy?: string;
+      limit?: number;
+      offset?: number;
+    },
+  ) => {
+    try {
+      const params = new URLSearchParams();
+      params.set("category", options.category || "OVERALL");
+      params.set("timePeriod", options.timePeriod || "ALL");
+      params.set("orderBy", options.orderBy || "PNL");
+      params.set("limit", String(options.limit || 50));
+      if (options.offset) params.set("offset", String(options.offset));
+
+      const url = `https://data-api.polymarket.com/v1/leaderboard?${params.toString()}`;
+      console.log("[Leaderboard] Fetching:", url);
+
+      const response = await fetch(url, {
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        console.error(
+          "[Leaderboard] API error:",
+          response.status,
+          response.statusText,
+        );
+        return [];
+      }
+
+      const data = await response.json();
+      console.log(
+        `[Leaderboard] Got ${Array.isArray(data) ? data.length : 0} traders for ${options.category}`,
+      );
+      return data;
+    } catch (error) {
+      console.error("Failed to fetch leaderboard:", error);
+      return [];
+    }
+  },
+);
+
+// ========== End Polymarket API Proxies ==========
 
 // Add target wallet
 ipcMain.handle("targets:add", async (_event, address: string) => {
@@ -964,7 +1770,7 @@ ipcMain.handle("bot:start", async () => {
   try {
     await botService.start();
     startTime = Date.now();
-    logs.push({
+    addLog({
       id: `log-${Date.now()}`,
       timestamp: Date.now(),
       type: "info",
@@ -972,7 +1778,7 @@ ipcMain.handle("bot:start", async () => {
     });
     return { running: true };
   } catch (error: any) {
-    logs.push({
+    addLog({
       id: `log-${Date.now()}`,
       timestamp: Date.now(),
       type: "error",
@@ -985,7 +1791,7 @@ ipcMain.handle("bot:start", async () => {
 ipcMain.handle("bot:stop", async () => {
   try {
     await botService.stop();
-    logs.push({
+    addLog({
       id: `log-${Date.now()}`,
       timestamp: Date.now(),
       type: "info",
@@ -1014,7 +1820,7 @@ ipcMain.handle("bot:restart", async () => {
     await new Promise((resolve) => setTimeout(resolve, 500));
     await botService.start();
     startTime = Date.now();
-    logs.push({
+    addLog({
       id: `log-${Date.now()}`,
       timestamp: Date.now(),
       type: "info",
@@ -1022,7 +1828,7 @@ ipcMain.handle("bot:restart", async () => {
     });
     return { running: true };
   } catch (error: any) {
-    logs.push({
+    addLog({
       id: `log-${Date.now()}`,
       timestamp: Date.now(),
       type: "error",
@@ -1141,7 +1947,7 @@ ipcMain.handle(
       // Write the file
       fs.writeFileSync(envFile, content, "utf-8");
 
-      logs.push({
+      addLog({
         id: `log-${Date.now()}`,
         timestamp: Date.now(),
         type: "info",
@@ -1181,7 +1987,7 @@ ipcMain.handle("paper:reset", async () => {
     updatedAt: Date.now(),
   };
   writeJsonFile("paper-state.json", newState);
-  logs.push({
+  addLog({
     id: `log-${Date.now()}`,
     timestamp: Date.now(),
     type: "info",
@@ -1365,7 +2171,7 @@ ipcMain.handle(
       state.accounts.push(newAccount);
       saveAccountsState(state);
 
-      logs.push({
+      addLog({
         id: `log-${Date.now()}`,
         timestamp: Date.now(),
         type: "info",
@@ -1415,7 +2221,7 @@ ipcMain.handle("accounts:remove", async (_event, accountId: string) => {
 
     saveAccountsState(state);
 
-    logs.push({
+    addLog({
       id: `log-${Date.now()}`,
       timestamp: Date.now(),
       type: "info",
@@ -1440,7 +2246,7 @@ ipcMain.handle("accounts:switch", async (_event, accountId: string | null) => {
       state.activeAccountId = null;
       config.mode = "paper";
 
-      logs.push({
+      addLog({
         id: `log-${Date.now()}`,
         timestamp: Date.now(),
         type: "info",
@@ -1483,7 +2289,7 @@ ipcMain.handle("accounts:switch", async (_event, accountId: string | null) => {
 
       fs.writeFileSync(envFile, content, "utf-8");
 
-      logs.push({
+      addLog({
         id: `log-${Date.now()}`,
         timestamp: Date.now(),
         type: "info",

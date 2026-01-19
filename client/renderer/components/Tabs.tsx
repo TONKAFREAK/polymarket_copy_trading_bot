@@ -497,6 +497,19 @@ function DashboardView({
               {activePositions.length} positions
             </span>
           </div>
+          {activePositions.length > 0 && (
+            <div className="@container flex items-center px-3 @[400px]:px-4 py-2 border-b border-white/[0.06] bg-white/[0.02]">
+              <div className="flex-1 min-w-0 mr-2 @[400px]:mr-3 @[500px]:mr-4">
+                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Market</span>
+              </div>
+              <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
+                <div className="w-8 @[400px]:w-10 text-center"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Side</span></div>
+                <div className="hidden @[400px]:flex w-14 @[500px]:w-16 justify-end"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Shares</span></div>
+                <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Value</span></div>
+                <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">PnL</span></div>
+              </div>
+            </div>
+          )}
           <div className="divide-y divide-white/[0.04] max-h-[400px] overflow-y-auto overflow-x-visible">
             {activePositions.length === 0 ? (
               <div className="px-5 py-8 text-center text-white/40">
@@ -924,6 +937,26 @@ function MiniPriceTooltip({ position }: { position: Position }) {
   );
 }
 
+// ========== Table Header Component ==========
+function TableHeader({ columns }: { columns: { label: string; width: string; align?: 'left' | 'right' | 'center'; hideBelow?: string }[] }) {
+  return (
+    <div className="@container flex items-center px-3 @[400px]:px-4 py-2 border-b border-white/[0.06] bg-white/[0.02]">
+      {columns.map((col, idx) => (
+        <div
+          key={idx}
+          className={`${col.width} ${col.hideBelow || ''} ${
+            col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left'
+          }`}
+        >
+          <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+            {col.label}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ========== Holding Row with Hover Tooltip ==========
 function HoldingRow({
   position,
@@ -945,7 +978,6 @@ function HoldingRow({
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    // Use viewport coordinates for fixed positioning
     setMousePos({
       x: e.clientX,
       y: e.clientY,
@@ -958,9 +990,6 @@ function HoldingRow({
 
   const isUp = position.pnl >= 0;
   const pnlColor = isUp ? "text-emerald-400" : "text-rose-400";
-  const outcomeColor = isUp
-    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-    : "bg-rose-500/20 text-rose-400 border border-rose-500/30";
 
   const displayMarket =
     position.market && position.market.includes("?")
@@ -973,17 +1002,20 @@ function HoldingRow({
       ? `https://polymarket-upload.s3.us-east-2.amazonaws.com/${position.marketSlug}.png`
       : null);
 
+  const formatValue = (val: number) => {
+    if (Math.abs(val) >= 1000) return `$${(val / 1000).toFixed(1)}K`;
+    return `$${val.toFixed(2)}`;
+  };
+
   return (
     <div
       ref={rowRef}
       onMouseEnter={handleMouseEnter}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      className={`group relative flex items-center justify-between px-4 py-3 hover:bg-white/[0.03] transition-colors border-b border-white/[0.04] last:border-0 ${
-        compact ? "" : "gap-4"
-      }`}
+      className="@container group flex items-center px-3 @[400px]:px-4 py-2.5 @[400px]:py-3 hover:bg-white/[0.03] transition-colors border-b border-white/[0.04] last:border-0"
     >
-      {/* Tooltip - fixed position in viewport, always on top */}
+      {/* Tooltip */}
       {isHovered && isActivePosition && (
         <div
           className="fixed pointer-events-none animate-fade-in"
@@ -997,46 +1029,56 @@ function HoldingRow({
         </div>
       )}
 
-      {/* Background image */}
-      {imageUrl && (
-        <div
-          className="absolute inset-0 bg-center bg-no-repeat opacity-[0.2] saturate-75"
-          style={{
-            backgroundImage: `url(${imageUrl})`,
-            backgroundSize: "45%",
-            WebkitMaskImage:
-              "linear-gradient(to right, transparent 0%, black 20%, black 80%, transparent 100%)",
-            maskImage:
-              "linear-gradient(to right, transparent 0%, black 20%, black 80%, transparent 100%)",
-          }}
-        />
-      )}
-      <div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-black/80 to-transparent" />
-      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-black/60 to-black/95" />
-      <div className="absolute inset-0 shadow-[inset_0_1px_4px_rgba(0,0,0,0.4)]" />
-
-      <div className="relative flex-1 min-w-0">
-        <p className="text-white/90 truncate text-sm font-medium">
+      {/* Market image and name */}
+      <div className="flex-1 min-w-0 flex items-center gap-2 @[400px]:gap-2.5 @[500px]:gap-3 mr-2 @[400px]:mr-3 @[500px]:mr-4">
+        {imageUrl && (
+          <img
+            alt=""
+            loading="lazy"
+            className="w-7 h-7 @[400px]:w-8 @[400px]:h-8 @[500px]:w-9 @[500px]:h-9 rounded object-cover flex-shrink-0 opacity-80 group-hover:opacity-100 transition-opacity"
+            src={imageUrl}
+          />
+        )}
+        <span className="text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] text-white/80 group-hover:text-white truncate transition-colors">
           {displayMarket}
-        </p>
-        <div className="flex items-center gap-2 mt-1">
-          <span className={`text-xs px-1.5 py-0.5 ${outcomeColor}`}>
-            {position.outcome}
-          </span>
-          <span className="text-xs text-white/40">
-            {position.shares.toFixed(2)} shares
+        </span>
+      </div>
+
+      {/* Right side info */}
+      <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
+        {/* Outcome badge */}
+        <div className="w-8 @[400px]:w-10 flex items-center justify-center">
+          <span
+            className={`text-[9px] @[400px]:text-[10px] @[500px]:text-[11px] font-bold px-1 @[400px]:px-1.5 py-0.5 ${
+              position.outcome === "Yes"
+                ? "bg-emerald-500/15 text-emerald-400"
+                : "bg-rose-500/10 text-rose-300"
+            }`}
+          >
+            {position.outcome?.toUpperCase() || "—"}
           </span>
         </div>
-      </div>
-      <div className="relative text-right">
-        <p className={`text-sm font-mono font-semibold ${pnlColor}`}>
-          {position.pnl >= 0 ? "+" : ""}${position.pnl.toFixed(2)}
-        </p>
-        <p className="text-xs text-white/40">
-          $
-          {position.currentPrice?.toFixed(3) ??
-            position.avgEntryPrice.toFixed(3)}
-        </p>
+
+        {/* Shares */}
+        <div className="hidden @[400px]:flex w-14 @[500px]:w-16 items-center justify-end">
+          <span className="text-[11px] @[500px]:text-[12px] font-medium text-white/50 tabular-nums">
+            {position.shares.toFixed(1)} sh
+          </span>
+        </div>
+
+        {/* Value */}
+        <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
+          <span className="text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums text-white/90">
+            {formatValue(position.currentValue)}
+          </span>
+        </div>
+
+        {/* PnL */}
+        <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
+          <span className={`text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums ${pnlColor}`}>
+            {position.pnl >= 0 ? "+" : ""}{formatValue(position.pnl)}
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -1906,16 +1948,31 @@ function PortfolioView({
             </p>
           </div>
         ) : (
-          <div className="divide-y divide-white/[0.04]">
-            {activePositions.map((pos, idx) => (
-              <PositionRowWithSell
-                key={idx}
-                position={pos}
-                onSell={handleSell}
-                selling={selling === pos.tokenId}
-              />
-            ))}
-          </div>
+          <>
+            <div className="@container flex items-center px-3 @[400px]:px-4 py-2 border-b border-white/[0.06] bg-white/[0.02]">
+              <div className="flex-1 min-w-0 mr-2 @[400px]:mr-3 @[500px]:mr-4">
+                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Market</span>
+              </div>
+              <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
+                <div className="w-8 @[400px]:w-10 text-center"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Side</span></div>
+                <div className="hidden @[400px]:flex w-14 @[500px]:w-16 justify-end"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Shares</span></div>
+                <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Value</span></div>
+                <div className="hidden @[500px]:flex w-16 @[600px]:w-20 justify-end"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Price</span></div>
+                <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">PnL</span></div>
+                <div className="w-14 @[400px]:w-16 @[500px]:w-18"></div>
+              </div>
+            </div>
+            <div className="divide-y divide-white/[0.04]">
+              {activePositions.map((pos, idx) => (
+                <PositionRowWithSell
+                  key={idx}
+                  position={pos}
+                  onSell={handleSell}
+                  selling={selling === pos.tokenId}
+                />
+              ))}
+            </div>
+          </>
         )}
       </div>
 
@@ -1927,6 +1984,16 @@ function PortfolioView({
             <span className="text-sm text-white/40">
               {closedPositions.length} closed
             </span>
+          </div>
+          <div className="@container flex items-center px-3 @[400px]:px-4 py-2 border-b border-white/[0.06] bg-white/[0.02]">
+            <div className="flex-1 min-w-0 mr-2 @[400px]:mr-3 @[500px]:mr-4">
+              <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Market</span>
+            </div>
+            <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
+              <div className="w-8 @[400px]:w-10 text-center"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Side</span></div>
+              <div className="hidden @[350px]:flex w-12 @[400px]:w-14 justify-center"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Status</span></div>
+              <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">PnL</span></div>
+            </div>
           </div>
           <div className="divide-y divide-white/[0.04] max-h-[300px] overflow-y-auto">
             {closedPositions.slice(0, 20).map((pos, idx) => (
@@ -1950,11 +2017,6 @@ function PositionRowWithSell({
 }) {
   const isUp = position.pnl >= 0;
   const pnlColor = isUp ? "text-emerald-400" : "text-rose-400";
-  // Outcome badge color based on PnL (up = green, down = red)
-  const outcomeColor = isUp
-    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-    : "bg-rose-500/20 text-rose-400 border border-rose-500/30";
-  // Border accent based on PnL
 
   // Use the market name as-is if it looks like a proper question, otherwise format the slug
   const displayMarket =
@@ -1969,70 +2031,89 @@ function PositionRowWithSell({
       ? `https://polymarket-upload.s3.us-east-2.amazonaws.com/${position.marketSlug}.png`
       : null);
 
-  return (
-    <div
-      className={`group relative flex items-center justify-between px-5 py-4 hover:bg-white/[0.03] transition-colors overflow-hidden border-b border-white/[0.04] last:border-0`}
-    >
-      {/* Background image - positioned left, brighter opacity */}
-      {imageUrl && (
-        <div
-          className="absolute inset-0 bg-center bg-no-repeat opacity-[0.2] saturate-75"
-          style={{
-            backgroundImage: `url(${imageUrl})`,
-            backgroundSize: "45%",
-            WebkitMaskImage:
-              "linear-gradient(to right, transparent 0%, black 20%, black 80%, transparent 100%)",
-            maskImage:
-              "linear-gradient(to right, transparent 0%, black 20%, black 80%, transparent 100%)",
-          }}
-        />
-      )}
-      {/* Gradient overlay - transparent on left, fading to black on right */}
-      <div className="absolute inset-0 bg-gradient-to-r from-black/40 via-black/70 to-black/95" />
-      {/* Inner shadow for depth */}
-      <div className="absolute inset-0 shadow-[inset_0_2px_8px_rgba(0,0,0,0.5)]" />
+  // Format value compactly
+  const formatValue = (val: number) => {
+    if (Math.abs(val) >= 1000) return `$${(val / 1000).toFixed(1)}K`;
+    return `$${val.toFixed(2)}`;
+  };
 
-      {/* Content */}
-      <div className="relative flex-1 min-w-0">
-        <p className="text-white/90 truncate font-medium">{displayMarket}</p>
-        <div className="flex items-center gap-2 mt-1">
-          <span className={`text-xs px-1.5 py-0.5   ${outcomeColor}`}>
-            {position.outcome}
-          </span>
-          <span className="text-xs text-white/40">
-            {position.shares.toFixed(2)} shares
-          </span>
-          <span className="text-xs text-white/30">
-            @ ${position.avgEntryPrice.toFixed(3)}
-          </span>
-        </div>
+  return (
+    <div className="@container group flex items-center px-3 @[400px]:px-4 py-2.5 @[400px]:py-3 hover:bg-white/[0.03] transition-colors border-b border-white/[0.04] last:border-0">
+      {/* Market image */}
+      <div className="flex-1 min-w-0 flex items-center gap-2 @[400px]:gap-2.5 @[500px]:gap-3 mr-2 @[400px]:mr-3 @[500px]:mr-4">
+        {imageUrl && (
+          <img
+            alt=""
+            loading="lazy"
+            className="w-7 h-7 @[400px]:w-8 @[400px]:h-8 @[500px]:w-9 @[500px]:h-9 rounded object-cover flex-shrink-0 opacity-80 group-hover:opacity-100 transition-opacity"
+            src={imageUrl}
+          />
+        )}
+        <span className="text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] text-white/80 group-hover:text-white truncate transition-colors">
+          {displayMarket}
+        </span>
       </div>
-      <div className="relative flex items-center gap-6 text-right">
-        <div>
-          <p className="text-xs text-white/40">Value</p>
-          <p className="text-sm font-mono text-white/80">
-            ${position.currentValue.toFixed(2)}
-          </p>
+
+      {/* Right side info */}
+      <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
+        {/* Outcome badge */}
+        <div className="w-8 @[400px]:w-10 flex items-center justify-center">
+          <span
+            className={`text-[9px] @[400px]:text-[10px] @[500px]:text-[11px] font-bold px-1 @[400px]:px-1.5 py-0.5 ${
+              position.outcome === "Yes"
+                ? "bg-emerald-500/15 text-emerald-400"
+                : "bg-rose-500/10 text-rose-300"
+            }`}
+          >
+            {position.outcome?.toUpperCase() || "—"}
+          </span>
         </div>
-        <div>
-          <p className="text-xs text-white/40">PnL</p>
-          <p className={`text-sm font-mono font-semibold ${pnlColor}`}>
-            {position.pnl >= 0 ? "+" : ""}${position.pnl.toFixed(2)}
-          </p>
+
+        {/* Shares */}
+        <div className="hidden @[400px]:flex w-14 @[500px]:w-16 items-center justify-end">
+          <span className="text-[11px] @[500px]:text-[12px] font-medium text-white/50 tabular-nums">
+            {position.shares.toFixed(1)} sh
+          </span>
         </div>
-        <button
-          onClick={() => onSell(position.tokenId)}
-          disabled={selling}
-          className={`px-4 py-2 text-sm font-medium   transition-all ${
-            selling
-              ? "bg-white/10 text-white/40 cursor-not-allowed"
-              : "bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 active:bg-rose-500/40"
-          }`}
-        >
-          {selling ? (
-            <span className="flex items-center gap-2">
+
+        {/* Current value */}
+        <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
+          <span className="text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums text-white/90">
+            {formatValue(position.currentValue)}
+          </span>
+        </div>
+
+        {/* Price info */}
+        <div className="hidden @[500px]:flex w-16 @[600px]:w-20 items-center justify-end gap-1 @[600px]:gap-1.5">
+          <span className="text-[11px] @[600px]:text-[12px] font-medium text-white/70 tabular-nums">
+            {(position.currentPrice * 100).toFixed(1)}¢
+          </span>
+          <span className="text-[9px] @[600px]:text-[10px] font-medium tabular-nums px-0.5 @[600px]:px-1 py-0.5 bg-white/[0.03] text-white/35">
+            @{(position.avgEntryPrice * 100).toFixed(0)}¢
+          </span>
+        </div>
+
+        {/* PnL */}
+        <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
+          <span className={`text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums ${pnlColor}`}>
+            {position.pnl >= 0 ? "+" : ""}{formatValue(position.pnl)}
+          </span>
+        </div>
+
+        {/* Sell button */}
+        <div className="w-14 @[400px]:w-16 @[500px]:w-18 flex items-center justify-end">
+          <button
+            onClick={() => onSell(position.tokenId)}
+            disabled={selling}
+            className={`text-[11px] @[400px]:text-[12px] font-medium px-2 @[400px]:px-3 py-1 @[400px]:py-1.5 rounded transition-all ${
+              selling
+                ? "bg-white/10 text-white/40 cursor-not-allowed"
+                : "bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 active:bg-rose-500/40"
+            }`}
+          >
+            {selling ? (
               <svg
-                className="w-4 h-4 animate-spin"
+                className="w-3 h-3 @[400px]:w-4 @[400px]:h-4 animate-spin"
                 fill="none"
                 viewBox="0 0 24 24"
               >
@@ -2050,12 +2131,11 @@ function PositionRowWithSell({
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                 ></path>
               </svg>
-              Selling...
-            </span>
-          ) : (
-            "Sell"
-          )}
-        </button>
+            ) : (
+              "Sell"
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -2079,46 +2159,57 @@ function ClosedPositionRow({ position }: { position: Position }) {
       ? `https://polymarket-upload.s3.us-east-2.amazonaws.com/${position.marketSlug}.png`
       : null);
 
-  return (
-    <div className="group relative flex items-center justify-between px-5 py-3 hover:bg-white/[0.03] transition-colors overflow-hidden border-b border-white/[0.04] last:border-0">
-      {/* Background image - less zoomed, with gradient edges */}
-      {imageUrl && (
-        <div
-          className="absolute inset-0 opacity-[0.15] saturate-50"
-          style={{
-            backgroundImage: `url(${imageUrl})`,
-            backgroundSize: "35% auto",
-            backgroundPosition: "left center",
-            backgroundRepeat: "no-repeat",
-          }}
-        />
-      )}
-      {/* Left edge gradient to blend image */}
-      <div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-black/80 to-transparent" />
-      {/* Right gradient overlay - fading to black */}
-      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-black/60 to-black/95" />
-      {/* Inner shadow for depth */}
-      <div className="absolute inset-0 shadow-[inset_0_2px_6px_rgba(0,0,0,0.4)]" />
+  // Format value compactly
+  const formatValue = (val: number) => {
+    if (Math.abs(val) >= 1000) return `$${(val / 1000).toFixed(1)}K`;
+    return `$${val.toFixed(2)}`;
+  };
 
-      <div className="relative flex-1 min-w-0">
-        <p className="text-white/70 truncate text-sm">{displayMarket}</p>
-        <div className="flex items-center gap-2 mt-1">
+  return (
+    <div className="@container group flex items-center px-3 @[400px]:px-4 py-2 @[400px]:py-2.5 hover:bg-white/[0.03] transition-colors border-b border-white/[0.04] last:border-0 opacity-70 hover:opacity-100">
+      {/* Market image */}
+      <div className="flex-1 min-w-0 flex items-center gap-2 @[400px]:gap-2.5 @[500px]:gap-3 mr-2 @[400px]:mr-3 @[500px]:mr-4">
+        {imageUrl && (
+          <img
+            alt=""
+            loading="lazy"
+            className="w-6 h-6 @[400px]:w-7 @[400px]:h-7 @[500px]:w-8 @[500px]:h-8 rounded object-cover flex-shrink-0 opacity-60 group-hover:opacity-80 transition-opacity grayscale"
+            src={imageUrl}
+          />
+        )}
+        <span className="text-[11px] @[400px]:text-[12px] @[500px]:text-[13px] text-white/60 group-hover:text-white/80 truncate transition-colors">
+          {displayMarket}
+        </span>
+      </div>
+
+      {/* Right side info */}
+      <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
+        {/* Outcome badge */}
+        <div className="w-8 @[400px]:w-10 flex items-center justify-center">
           <span
-            className={`text-xs px-1.5 py-0.5   ${
-              pnl >= 0
+            className={`text-[9px] @[400px]:text-[10px] @[500px]:text-[11px] font-bold px-1 @[400px]:px-1.5 py-0.5 ${
+              position.outcome === "Yes"
                 ? "bg-emerald-500/10 text-emerald-400/60"
-                : "bg-rose-500/10 text-rose-400/60"
+                : "bg-rose-500/10 text-rose-300/60"
             }`}
           >
-            {position.outcome}
+            {position.outcome?.toUpperCase() || "—"}
           </span>
-          <span className="text-xs text-white/30">Closed</span>
         </div>
-      </div>
-      <div className="relative text-right">
-        <p className={`text-sm font-mono font-semibold ${pnlColor}`}>
-          {pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}
-        </p>
+
+        {/* Closed badge */}
+        <div className="hidden @[350px]:flex w-12 @[400px]:w-14 items-center justify-center">
+          <span className="text-[9px] @[400px]:text-[10px] @[500px]:text-[11px] font-medium px-1 @[400px]:px-1.5 py-0.5 bg-white/5 text-white/30">
+            CLOSED
+          </span>
+        </div>
+
+        {/* PnL */}
+        <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
+          <span className={`text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums ${pnlColor}`}>
+            {pnl >= 0 ? "+" : ""}{formatValue(pnl)}
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -2430,15 +2521,33 @@ function PerformanceView({
             </p>
           </div>
         ) : (
-          <div className="divide-y divide-white/[0.04] max-h-[500px] overflow-y-auto">
-            {trades.map((trade, idx) => (
-              <TradeHistoryRow
-                key={`${trade.id}-${trade.timestamp}-${idx}`}
-                trade={trade}
-                formatTime={formatTime}
-              />
-            ))}
-          </div>
+          <>
+            <div className="@container flex items-center px-3 @[400px]:px-4 py-2 border-b border-white/[0.06] bg-white/[0.02]">
+              <div className="w-10 @[400px]:w-12 @[500px]:w-14 flex-shrink-0 mr-2 @[400px]:mr-3">
+                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Time</span>
+              </div>
+              <div className="flex-1 min-w-0 mr-2 @[400px]:mr-3 @[500px]:mr-4">
+                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Market</span>
+              </div>
+              <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
+                <div className="w-10 @[400px]:w-12 @[500px]:w-14 text-center"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Side</span></div>
+                <div className="hidden @[350px]:flex w-8 @[400px]:w-10 justify-center"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Bet</span></div>
+                <div className="hidden @[450px]:flex w-12 @[500px]:w-14 justify-end"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Shares</span></div>
+                <div className="w-12 @[400px]:w-14 @[500px]:w-16 text-right"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Value</span></div>
+                <div className="hidden @[500px]:flex w-14 @[600px]:w-16 justify-end"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Price</span></div>
+                <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">PnL</span></div>
+              </div>
+            </div>
+            <div className="divide-y divide-white/[0.04] max-h-[500px] overflow-y-auto">
+              {trades.map((trade, idx) => (
+                <TradeHistoryRow
+                  key={`${trade.id}-${trade.timestamp}-${idx}`}
+                  trade={trade}
+                  formatTime={formatTime}
+                />
+              ))}
+            </div>
+          </>
         )}
       </div>
     </div>
@@ -2459,26 +2568,6 @@ function TradeHistoryRow({
       ? "text-emerald-400"
       : "text-rose-400"
     : "text-white/40";
-  const sideColor =
-    trade.side === "BUY"
-      ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-      : "bg-rose-500/20 text-rose-400 border border-rose-500/30";
-  // Outcome badge color based on trade PnL
-  const outcomeColor = hasPnl
-    ? isUp
-      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-      : "bg-rose-500/10 text-rose-400 border border-rose-500/20"
-    : trade.outcome === "YES"
-      ? "bg-emerald-500/10 text-emerald-400"
-      : "bg-rose-500/10 text-rose-400";
-  // Border accent based on PnL
-  // const borderAccent = hasPnl
-  //   ? isUp
-  //     ? "border-l-4 border-l-emerald-500"
-  //     : "border-l-4 border-l-rose-500"
-  //   : trade.side === "BUY"
-  //     ? "border-l-4 border-l-emerald-500/50"
-  //     : "border-l-4 border-l-rose-500/50";
 
   // Use the market name as-is if it looks like a proper question, otherwise format the slug
   const displayMarket =
@@ -2493,69 +2582,106 @@ function TradeHistoryRow({
       ? `https://polymarket-upload.s3.us-east-2.amazonaws.com/${trade.marketSlug}.png`
       : null);
 
-  return (
-    <div
-      className={`group relative flex items-center justify-between px-5 py-4 hover:bg-white/[0.03] transition-colors overflow-hidden border-b border-white/[0.04] last:border-0 `}
-    >
-      {/* Background image - centered with padding, faded on both sides */}
-      {imageUrl && (
-        <div
-          className="absolute inset-0 bg-center bg-no-repeat opacity-[0.2] saturate-75"
-          style={{
-            backgroundImage: `url(${imageUrl})`,
-            backgroundSize: "45%",
-            WebkitMaskImage:
-              "linear-gradient(to right, transparent 0%, black 20%, black 80%, transparent 100%)",
-            maskImage:
-              "linear-gradient(to right, transparent 0%, black 20%, black 80%, transparent 100%)",
-          }}
-        />
-      )}
-      {/* Gradient overlay - faded on both left and right sides */}
-      <div className="absolute inset-0 bg-gradient-to-r from-black/95 via-black/20 to-black/95" />
-      {/* Inner shadow for depth */}
-      <div className="absolute inset-0 shadow-[inset_0_1px_4px_rgba(0,0,0,0.3)]" />
+  // Format value compactly
+  const formatValue = (val: number) => {
+    if (Math.abs(val) >= 1000) return `$${(val / 1000).toFixed(1)}K`;
+    return `$${val.toFixed(2)}`;
+  };
 
-      <div className="relative flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className={`text-xs px-1.5 py-0.5   ${sideColor}`}>
+  // Format relative time
+  const getRelativeTime = (ts: number) => {
+    const now = Date.now();
+    const diff = now - ts;
+    const mins = Math.floor(diff / 60000);
+    const hrs = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    if (mins < 1) return "now";
+    if (mins < 60) return `${mins}m`;
+    if (hrs < 24) return `${hrs}h`;
+    if (days < 7) return `${days}d`;
+    return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  };
+
+  return (
+    <div className="@container group flex items-center px-3 @[400px]:px-4 py-2.5 @[400px]:py-3 hover:bg-white/[0.03] transition-colors border-b border-white/[0.04] last:border-0">
+      {/* Time */}
+      <div className="w-10 @[400px]:w-12 @[500px]:w-14 flex-shrink-0 mr-2 @[400px]:mr-3">
+        <span className="text-[10px] @[400px]:text-[11px] @[500px]:text-[12px] font-medium text-white/45 tabular-nums">
+          {getRelativeTime(trade.timestamp)}
+        </span>
+      </div>
+
+      {/* Market image and name */}
+      <div className="flex-1 min-w-0 flex items-center gap-2 @[400px]:gap-2.5 @[500px]:gap-3 mr-2 @[400px]:mr-3 @[500px]:mr-4">
+        {imageUrl && (
+          <img
+            alt=""
+            loading="lazy"
+            className="w-7 h-7 @[400px]:w-8 @[400px]:h-8 @[500px]:w-9 @[500px]:h-9 rounded object-cover flex-shrink-0 opacity-80 group-hover:opacity-100 transition-opacity"
+            src={imageUrl}
+          />
+        )}
+        <span className="text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] text-white/80 group-hover:text-white truncate transition-colors">
+          {displayMarket}
+        </span>
+      </div>
+
+      {/* Right side info */}
+      <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
+        {/* Side badge */}
+        <div className="w-10 @[400px]:w-12 @[500px]:w-14 flex items-center justify-center gap-1">
+          <span
+            className={`text-[9px] @[400px]:text-[10px] @[500px]:text-[11px] font-bold uppercase px-1 @[400px]:px-1.5 py-0.5 ${
+              trade.side === "BUY"
+                ? "bg-emerald-500/15 text-emerald-400"
+                : "bg-rose-500/15 text-rose-400"
+            }`}
+          >
             {trade.side}
           </span>
-          <span className={`text-xs px-1.5 py-0.5   ${outcomeColor}`}>
+        </div>
+
+        {/* Outcome badge */}
+        <div className="hidden @[350px]:flex w-8 @[400px]:w-10 items-center justify-center">
+          <span
+            className={`text-[9px] @[400px]:text-[10px] @[500px]:text-[11px] font-bold px-1 @[400px]:px-1.5 py-0.5 ${
+              trade.outcome === "YES"
+                ? "bg-emerald-500/10 text-emerald-300"
+                : "bg-rose-500/10 text-rose-300"
+            }`}
+          >
             {trade.outcome}
           </span>
-          <span className="text-xs text-white/40 font-mono">
-            {formatTime(trade.timestamp)}
+        </div>
+
+        {/* Shares */}
+        <div className="hidden @[450px]:flex w-12 @[500px]:w-14 items-center justify-end">
+          <span className="text-[10px] @[500px]:text-[11px] font-medium text-white/50 tabular-nums">
+            {trade.shares.toFixed(1)} sh
           </span>
         </div>
-        <p className="text-white/80 mt-1 truncate text-sm">{displayMarket}</p>
-      </div>
-      <div className="relative flex items-center gap-6 text-right">
-        <div>
-          <p className="text-xs text-white/40">Shares</p>
-          <p className="text-sm font-mono text-white/80">
-            {trade.shares.toFixed(2)}
-          </p>
+
+        {/* Value */}
+        <div className="w-12 @[400px]:w-14 @[500px]:w-16 text-right">
+          <span className="text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums text-white/90">
+            {formatValue(trade.usdValue)}
+          </span>
         </div>
-        <div>
-          <p className="text-xs text-white/40">Price</p>
-          <p className="text-sm font-mono text-white/80">
-            ${trade.price.toFixed(3)}
-          </p>
+
+        {/* Price */}
+        <div className="hidden @[500px]:flex w-14 @[600px]:w-16 items-center justify-end">
+          <span className="text-[11px] @[600px]:text-[12px] font-medium text-white/70 tabular-nums">
+            {(trade.price * 100).toFixed(1)}¢
+          </span>
         </div>
-        <div>
-          <p className="text-xs text-white/40">Value</p>
-          <p className="text-sm font-mono text-white/80">
-            ${trade.usdValue.toFixed(2)}
-          </p>
-        </div>
-        <div className="min-w-[80px]">
-          <p className="text-xs text-white/40">PnL</p>
-          <p className={`text-sm font-mono font-semibold ${pnlColor}`}>
+
+        {/* PnL */}
+        <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
+          <span className={`text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums ${pnlColor}`}>
             {hasPnl
-              ? `${trade.pnl! >= 0 ? "+" : ""}$${trade.pnl!.toFixed(2)}`
-              : "-"}
-          </p>
+              ? `${trade.pnl! >= 0 ? "+" : ""}${formatValue(trade.pnl!)}`
+              : "—"}
+          </span>
         </div>
       </div>
     </div>

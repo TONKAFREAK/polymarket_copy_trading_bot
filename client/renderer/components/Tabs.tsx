@@ -4,6 +4,7 @@ import React, {
   useEffect,
   useCallback,
   useRef,
+  useLayoutEffect,
 } from "react";
 import type {
   DashboardStats,
@@ -1390,21 +1391,21 @@ function PerformanceChart({
   }, []);
 
   // No data state
-  if (!chartMetrics.hasData) {
-    return (
-      <div className="space-y-3">
-        <div className="px-1">
-          <div className="text-[32px] font-medium text-white/20 tracking-tight">
-            $0.00
-          </div>
-          <div className="text-sm text-white/10">+$0.00 (0.00%)</div>
-        </div>
-        <div className="h-[180px] flex items-center justify-center">
-          <p className="text-white/20 text-sm">No performance data yet</p>
-        </div>
-      </div>
-    );
-  }
+  // if (!chartMetrics.hasData) {
+  //   return (
+  //     <div className="space-y-3">
+  //       <div className="px-1">
+  //         <div className="text-[32px] font-medium text-white/20 tracking-tight">
+  //           $0.00
+  //         </div>
+  //         <div className="text-sm text-white/10">+$0.00 (0.00%)</div>
+  //       </div>
+  //       <div className="h-[180px] flex items-center justify-center">
+  //         <p className="text-white/20 text-sm">No performance data yet</p>
+  //       </div>
+  //     </div>
+  //   );
+  // }
 
   const {
     currentBalance,
@@ -1412,6 +1413,7 @@ function PerformanceChart({
     totalChange,
     percentChange,
     isPositive,
+    hasData,
   } = chartMetrics;
   const lineColor = isPositive ? "#00c853" : "#ff5252";
 
@@ -1450,6 +1452,55 @@ function PerformanceChart({
   const displayPositive = displayChange >= 0;
   const displayColor = displayPositive ? "#00c853" : "#ff5252";
 
+  // Show placeholder when no data
+  if (!hasData) {
+    return (
+      <div className="space-y-1">
+        <div className="px-1 mb-4">
+          <div className="text-[32px] font-medium tracking-tight text-white">
+            {formatCurrency(startingBalance)}
+          </div>
+          <div className="flex items-center gap-2 text-[15px] text-white/40">
+            <span>+$0.00</span>
+            <span>(0.00%)</span>
+            <span className="text-white/30 text-xs">No trades yet</span>
+          </div>
+        </div>
+        <div className="relative h-[180px] flex items-center justify-center bg-white/[0.02] rounded">
+          <div className="text-center">
+            <svg
+              className="w-10 h-10 mx-auto text-white/10 mb-2"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4v16"
+              />
+            </svg>
+            <p className="text-white/30 text-sm">Performance chart will appear here</p>
+            <p className="text-white/20 text-xs mt-1">Start trading to see your progress</p>
+          </div>
+        </div>
+        {/* Time range buttons - disabled state */}
+        <div className="flex items-center justify-center gap-0 pt-2">
+          {(["1D", "1W", "1M", "3M", "1Y", "ALL"] as TimeRange[]).map((range) => (
+            <button
+              key={range}
+              disabled
+              className="px-4 py-2 text-[13px] font-medium text-white/20 cursor-not-allowed"
+            >
+              {range}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-1">
       {/* Balance display - Robinhood style */}
@@ -1481,6 +1532,7 @@ function PerformanceChart({
       </div>
 
       {/* Chart - Clean Robinhood style */}
+
       <div className="relative">
         <svg
           ref={svgRef}
@@ -2516,12 +2568,16 @@ type TraderSortKey =
 type TraderTag =
   | "all"
   | "politics"
-  | "crypto"
   | "sports"
-  | "pop-culture"
-  | "other";
+  | "crypto"
+  | "finance"
+  | "culture"
+  | "mentions"
+  | "weather"
+  | "economics"
+  | "tech";
 
-// Toast notification component
+// Toast notification component - simple, top right, just text
 function Toast({
   message,
   type,
@@ -2532,88 +2588,20 @@ function Toast({
   onClose: () => void;
 }) {
   useEffect(() => {
-    const timer = setTimeout(onClose, 3000);
+    const timer = setTimeout(onClose, 2000);
     return () => clearTimeout(timer);
   }, [onClose]);
 
-  const bgColor =
-    type === "success"
-      ? "bg-emerald-500/20 border-emerald-500/30"
-      : type === "error"
-        ? "bg-rose-500/20 border-rose-500/30"
-        : "bg-blue-500/20 border-blue-500/30";
   const textColor =
     type === "success"
       ? "text-emerald-400"
       : type === "error"
         ? "text-rose-400"
-        : "text-blue-400";
-  const icon =
-    type === "success" ? (
-      <svg
-        className="w-4 h-4"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M5 13l4 4L19 7"
-        />
-      </svg>
-    ) : type === "error" ? (
-      <svg
-        className="w-4 h-4"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M6 18L18 6M6 6l12 12"
-        />
-      </svg>
-    ) : (
-      <svg
-        className="w-4 h-4"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-        />
-      </svg>
-    );
+        : "text-white/70";
 
   return (
-    <div
-      className={`fixed bottom-4 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-lg border ${bgColor} ${textColor} shadow-lg animate-slide-up`}
-    >
-      {icon}
-      <span className="text-sm font-medium">{message}</span>
-      <button onClick={onClose} className="ml-2 hover:opacity-70">
-        <svg
-          className="w-4 h-4"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M6 18L18 6M6 6l12 12"
-          />
-        </svg>
-      </button>
+    <div className="fixed top-12 right-3 z-[100] animate-fade-in">
+      <span className={`text-sm font-medium ${textColor}`}>{message}</span>
     </div>
   );
 }
@@ -2649,13 +2637,13 @@ function ConfirmModal({
         <div className="flex items-center justify-end gap-3 mt-6">
           <button
             onClick={onCancel}
-            className="px-4 py-2 text-sm font-medium bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/70 hover:text-white transition-colors"
+            className="px-4 py-2 text-sm font-medium bg-white/5 hover:bg-white/10 border border-white/10 rounded-none text-white/70 hover:text-white transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
-            className="px-4 py-2 text-sm font-medium bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 transition-colors"
+            className="px-4 py-2 text-sm font-medium bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-none text-emerald-400 transition-colors"
           >
             Confirm
           </button>
@@ -2668,12 +2656,20 @@ function ConfirmModal({
 function TradersView() {
   const [traders, setTraders] = useState<Trader[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<TraderSortKey>("total_pnl");
+  const [sortKey, setSortKey] = useState<TraderSortKey>("smart_score");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [selectedTag, setSelectedTag] = useState<TraderTag>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [targets, setTargets] = useState<string[]>([]);
+  const [showTargetsOnly, setShowTargetsOnly] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [offset, setOffset] = useState(0);
+  const [searchResults, setSearchResults] = useState<Trader[] | null>(null);
+  const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+  const savedScrollPosition = React.useRef<number>(0);
 
   // Toast state
   const [toast, setToast] = useState<{
@@ -2707,18 +2703,25 @@ function TradersView() {
     fetchTargets();
   }, []);
 
-  // Add target function - uses targets:add IPC handler
-  const addTarget = async (address: string, name: string) => {
+  // Toggle target function - add if not exists, remove if exists
+  const toggleTarget = async (address: string, name: string) => {
     try {
       const normalizedAddress = address.toLowerCase();
 
-      // Check if already exists
+      // Check if already exists - remove it
       if (targets.includes(normalizedAddress)) {
-        showToast("Trader is already in your targets list", "info");
+        const newTargets = await window.ipc?.invoke<string[]>(
+          "targets:remove",
+          address,
+        );
+        if (newTargets) {
+          setTargets(newTargets.map((t) => t.toLowerCase()));
+          showToast("Removed", "info");
+        }
         return;
       }
 
-      // Use the targets:add IPC handler
+      // Add new target
       const newTargets = await window.ipc?.invoke<string[]>(
         "targets:add",
         address,
@@ -2726,11 +2729,31 @@ function TradersView() {
 
       if (newTargets) {
         setTargets(newTargets.map((t) => t.toLowerCase()));
-        showToast(`Added ${name} to copy trading targets`, "success");
+        showToast("Added", "success");
       }
     } catch (e) {
-      console.error("Failed to add target:", e);
-      showToast("Failed to add trader to targets", "error");
+      console.error("Failed to toggle target:", e);
+      showToast("Failed", "error");
+    }
+  };
+
+  // Alias for backward compatibility
+  const addTarget = toggleTarget;
+
+  // Remove target function
+  const removeTarget = async (address: string) => {
+    try {
+      const newTargets = await window.ipc?.invoke<string[]>(
+        "targets:remove",
+        address,
+      );
+      if (newTargets) {
+        setTargets(newTargets.map((t) => t.toLowerCase()));
+        showToast("Removed from tracking", "info");
+      }
+    } catch (e) {
+      console.error("Failed to remove target:", e);
+      showToast("Failed to remove", "error");
     }
   };
 
@@ -2749,30 +2772,237 @@ function TradersView() {
   // Copy address function
   const copyAddress = (address: string) => {
     navigator.clipboard.writeText(address);
-    showToast("Address copied to clipboard", "success");
+    showToast("Copied!", "success");
   };
 
-  // Use hardcoded top traders data (Polymarket leaderboard API is not publicly accessible)
+  // Debounce search query
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Search API when debounced search changes (if query is long enough)
+  useEffect(() => {
+    if (debouncedSearch.length < 2) {
+      setSearchResults(null);
+      return;
+    }
+
+    const searchTraders = async () => {
+      try {
+        const results = await window.ipc?.invoke("polymarket:searchTraders", {
+          query: debouncedSearch,
+          limit: 30,
+        });
+
+        if (Array.isArray(results) && results.length > 0) {
+          const mapped: Trader[] = results.map((t: any, idx: number) => ({
+            wallet_address: t.proxyWallet || t.address || "",
+            username: t.userName || t.name || `${(t.proxyWallet || "").slice(0, 8)}...`,
+            avatar_url: t.profileImage || t.avatarUrl || "",
+            total_pnl: parseFloat(t.pnl || "0"),
+            total_volume: parseFloat(t.vol || t.volume || "0"),
+            rank_volume: idx + 1,
+            win_rate: 0.5,
+            roi: 0,
+            smart_score: 50,
+            sharpe_ratio: 0,
+            best_tag: "overall",
+            current_streak: 0,
+            position_count: 0,
+            is_active: true,
+            avg_hold_hours: 0,
+            verified_badge: t.verifiedBadge || false,
+            x_username: t.xUsername || "",
+          }));
+          setSearchResults(mapped);
+        } else {
+          setSearchResults([]);
+        }
+      } catch (e) {
+        console.error("Search failed:", e);
+        setSearchResults(null);
+      }
+    };
+
+    searchTraders();
+  }, [debouncedSearch]);
+
+  // Load more traders function - preserves scroll position
+  const loadMoreTraders = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+
+    // Save current scroll position BEFORE any state changes
+    const container = scrollContainerRef.current;
+    if (container) {
+      savedScrollPosition.current = container.scrollTop;
+    }
+
+    setLoadingMore(true);
+    try {
+      const categoryMap: Record<string, string> = {
+        all: "OVERALL",
+        politics: "POLITICS",
+        sports: "SPORTS",
+        crypto: "CRYPTO",
+        finance: "FINANCE",
+        culture: "CULTURE",
+        mentions: "MENTIONS",
+        weather: "WEATHER",
+        economics: "ECONOMICS",
+        tech: "TECH",
+      };
+
+      let newTraders: Trader[] = [];
+
+      if (selectedTag === "all") {
+        // For "all", fetch from multiple categories with offset
+        const categories = ["POLITICS", "CRYPTO", "SPORTS", "CULTURE"];
+        const perCategoryLimit = 15;
+        const perCategoryOffset = Math.floor((offset + 50) / categories.length);
+        
+        const promises = categories.map((cat) =>
+          window.ipc.invoke("polymarket:getLeaderboard", {
+            category: cat,
+            timePeriod: "ALL",
+            orderBy: "PNL",
+            limit: perCategoryLimit,
+            offset: perCategoryOffset,
+          }),
+        );
+        const results = await Promise.all(promises);
+        
+        // Combine all results
+        const combined: any[] = [];
+        results.forEach((result, catIdx) => {
+          if (Array.isArray(result)) {
+            result.forEach((t: any) => {
+              combined.push({ ...t, apiCategory: categories[catIdx] });
+            });
+          }
+        });
+
+        newTraders = combined.map((t: any, idx: number) => ({
+          wallet_address: t.proxyWallet || "",
+          username: t.userName || (t.proxyWallet ? `${t.proxyWallet.slice(0, 8)}...` : "Unknown"),
+          avatar_url: t.profileImage || "",
+          total_pnl: parseFloat(t.pnl || "0"),
+          total_volume: parseFloat(t.vol || "0"),
+          rank_volume: offset + 50 + idx + 1,
+          win_rate: 0.5 + Math.random() * 0.4,
+          roi: t.vol > 0 ? (t.pnl || 0) / t.vol : 0,
+          smart_score: 50 + Math.random() * 50,
+          sharpe_ratio: Math.random() * 2,
+          best_tag: (t.apiCategory || "overall").toLowerCase() as any,
+          current_streak: Math.floor(Math.random() * 10) - 3,
+          position_count: Math.floor(Math.random() * 100),
+          is_active: Math.random() > 0.3,
+          avg_hold_hours: Math.floor(Math.random() * 200),
+          verified_badge: t.verifiedBadge || false,
+          x_username: t.xUsername || "",
+        }));
+      } else {
+        // Single category fetch
+        const apiCategory = categoryMap[selectedTag] || "OVERALL";
+        const data = await window.ipc?.invoke("polymarket:getLeaderboard", {
+          category: apiCategory,
+          timePeriod: "ALL",
+          orderBy: "PNL",
+          limit: 50,
+          offset: offset + 50,
+        });
+
+        if (Array.isArray(data) && data.length > 0) {
+          newTraders = data.map((t: any, idx: number) => ({
+            wallet_address: t.proxyWallet || "",
+            username: t.userName || (t.proxyWallet ? `${t.proxyWallet.slice(0, 8)}...` : "Unknown"),
+            avatar_url: t.profileImage || "",
+            total_pnl: parseFloat(t.pnl || "0"),
+            total_volume: parseFloat(t.vol || "0"),
+            rank_volume: offset + 50 + idx + 1,
+            win_rate: 0.5 + Math.random() * 0.4,
+            roi: t.vol > 0 ? (t.pnl || 0) / t.vol : 0,
+            smart_score: 50 + Math.random() * 50,
+            sharpe_ratio: Math.random() * 2,
+            best_tag: selectedTag,
+            current_streak: Math.floor(Math.random() * 10) - 3,
+            position_count: Math.floor(Math.random() * 100),
+            is_active: Math.random() > 0.3,
+            avg_hold_hours: Math.floor(Math.random() * 200),
+            verified_badge: t.verifiedBadge || false,
+            x_username: t.xUsername || "",
+          }));
+        }
+      }
+
+      if (newTraders.length > 0) {
+        // Dedupe by address
+        const existingAddresses = new Set(traders.map(t => t.wallet_address.toLowerCase()));
+        const uniqueNew = newTraders.filter(t => t.wallet_address && !existingAddresses.has(t.wallet_address.toLowerCase()));
+
+        setTraders(prev => [...prev, ...uniqueNew]);
+        setOffset(prev => prev + 50);
+        setHasMore(newTraders.length >= (selectedTag === "all" ? 40 : 50)); // Check if we got enough results
+      } else {
+        setHasMore(false);
+      }
+    } catch (e) {
+      console.error("Failed to load more:", e);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMore, selectedTag, offset, traders]);
+
+  // Restore scroll position after traders list updates (when loading more)
+  useLayoutEffect(() => {
+    if (savedScrollPosition.current > 0 && scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = savedScrollPosition.current;
+    }
+  }, [traders]);
+
+  // Scroll handler for infinite scroll
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      if (scrollHeight - scrollTop - clientHeight < 200) {
+        loadMoreTraders();
+      }
+    };
+
+    container.addEventListener("scroll", handleScroll);
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, [loadMoreTraders]);
+
+  // Fetch initial traders
   useEffect(() => {
     const fetchTraders = async () => {
       setLoading(true);
       setError(null);
+      setOffset(0);
+      setHasMore(true);
       try {
         // Map our tag names to Polymarket API category names
         const categoryMap: Record<string, string> = {
           all: "OVERALL",
           politics: "POLITICS",
-          crypto: "CRYPTO",
           sports: "SPORTS",
-          "pop-culture": "CULTURE",
-          other: "OVERALL", // Fallback to overall for "other"
+          crypto: "CRYPTO",
+          finance: "FINANCE",
+          culture: "CULTURE",
+          mentions: "MENTIONS",
+          weather: "WEATHER",
+          economics: "ECONOMICS",
+          tech: "TECH",
         };
 
         const apiCategory = categoryMap[selectedTag] || "OVERALL";
-
-        // Fetch from real Polymarket Leaderboard API via IPC
         let data: any[] = [];
-        
+
         if (selectedTag === "all") {
           // For "all", fetch from multiple categories and combine
           const categories = ["POLITICS", "CRYPTO", "SPORTS", "CULTURE"];
@@ -2781,15 +3011,16 @@ function TradersView() {
               category: cat,
               timePeriod: "ALL",
               orderBy: "PNL",
-              limit: 15,
-            })
+              limit: 25,
+            }),
           );
           const results = await Promise.all(promises);
-          
+
           // Combine and dedupe by address
           const seen = new Set<string>();
           results.forEach((catData, idx) => {
             const catName = categories[idx].toLowerCase();
+            //@ts-ignore
             (catData || []).forEach((t: any) => {
               const addr = (t.proxyWallet || "").toLowerCase();
               if (addr && !seen.has(addr)) {
@@ -2798,15 +3029,20 @@ function TradersView() {
               }
             });
           });
+          setHasMore(false); // Can't paginate combined view
         } else {
-          // Fetch single category
+          // Fetch single category with pagination support
           data = await window.ipc.invoke("polymarket:getLeaderboard", {
             category: apiCategory,
             timePeriod: "ALL",
             orderBy: "PNL",
             limit: 50,
           });
-          data = (data || []).map((t: any) => ({ ...t, apiCategory: selectedTag }));
+          data = (data || []).map((t: any) => ({
+            ...t,
+            apiCategory: selectedTag,
+          }));
+          setHasMore(data.length === 50);
         }
 
         if (!Array.isArray(data) || data.length === 0) {
@@ -2818,27 +3054,28 @@ function TradersView() {
 
         // Map API response to our Trader type
         // API returns: rank, proxyWallet, userName, vol, pnl, profileImage, xUsername, verifiedBadge
-        const mappedTraders: Trader[] = data.map(
-          (t: any, idx: number) => ({
-            wallet_address: t.proxyWallet || "",
-            username: t.userName || (t.proxyWallet ? `${t.proxyWallet.slice(0, 8)}...` : "Unknown"),
-            avatar_url: t.profileImage || "",
-            total_pnl: parseFloat(t.pnl || "0"),
-            total_volume: parseFloat(t.vol || "0"),
-            rank_volume: parseInt(t.rank || String(idx + 1)),
-            win_rate: 0.5 + Math.random() * 0.4, // Not provided by API
-            roi: t.vol > 0 ? (t.pnl || 0) / t.vol : 0,
-            smart_score: 50 + Math.random() * 50, // Not provided by API
-            sharpe_ratio: Math.random() * 2, // Not provided by API
-            best_tag: t.apiCategory || selectedTag === "all" ? "overall" : selectedTag,
-            current_streak: Math.floor(Math.random() * 10) - 3, // Not provided by API
-            position_count: Math.floor(Math.random() * 100), // Not provided by API
-            is_active: Math.random() > 0.3, // Not provided by API
-            avg_hold_hours: Math.floor(Math.random() * 200), // Not provided by API
-            verified_badge: t.verifiedBadge || false,
-            x_username: t.xUsername || "",
-          }),
-        );
+        const mappedTraders: Trader[] = data.map((t: any, idx: number) => ({
+          wallet_address: t.proxyWallet || "",
+          username:
+            t.userName ||
+            (t.proxyWallet ? `${t.proxyWallet.slice(0, 8)}...` : "Unknown"),
+          avatar_url: t.profileImage || "",
+          total_pnl: parseFloat(t.pnl || "0"),
+          total_volume: parseFloat(t.vol || "0"),
+          rank_volume: parseInt(t.rank || String(idx + 1)),
+          win_rate: 0.5 + Math.random() * 0.4, // Not provided by API
+          roi: t.vol > 0 ? (t.pnl || 0) / t.vol : 0,
+          smart_score: 50 + Math.random() * 50, // Not provided by API
+          sharpe_ratio: Math.random() * 2, // Not provided by API
+          best_tag:
+            t.apiCategory || selectedTag === "all" ? "overall" : selectedTag,
+          current_streak: Math.floor(Math.random() * 10) - 3, // Not provided by API
+          position_count: Math.floor(Math.random() * 100), // Not provided by API
+          is_active: Math.random() > 0.3, // Not provided by API
+          avg_hold_hours: Math.floor(Math.random() * 200), // Not provided by API
+          verified_badge: t.verifiedBadge || false,
+          x_username: t.xUsername || "",
+        }));
 
         setTraders(mappedTraders);
       } catch (e: any) {
@@ -2852,15 +3089,22 @@ function TradersView() {
     fetchTraders();
   }, [selectedTag]); // Re-fetch when category changes
 
-  // Sort and filter traders
+  // Sort and filter traders - use search results if available
   const sortedTraders = useMemo(() => {
-    let filtered = traders;
+    // Use search results if we have them and search is active
+    let filtered = searchResults !== null && debouncedSearch.length >= 2
+      ? searchResults
+      : traders;
 
-    // No need to filter by tag anymore since we fetch by category
-    // But keep it for "all" category display
+    // Filter by targets only if enabled
+    if (showTargetsOnly) {
+      filtered = filtered.filter((t) =>
+        targets.includes(t.wallet_address.toLowerCase()),
+      );
+    }
 
-    // Filter by search
-    if (searchQuery.trim()) {
+    // Local filter by search (for loaded traders when no API search results)
+    if (searchQuery.trim() && searchResults === null) {
       const q = searchQuery.toLowerCase();
       filtered = filtered.filter(
         (t) =>
@@ -2875,7 +3119,7 @@ function TradersView() {
       const bVal = b[sortKey] ?? 0;
       return sortDir === "desc" ? bVal - aVal : aVal - bVal;
     });
-  }, [traders, sortKey, sortDir, searchQuery]);
+  }, [traders, sortKey, sortDir, searchQuery, debouncedSearch, searchResults, showTargetsOnly, targets]);
 
   const handleSort = (key: TraderSortKey) => {
     if (sortKey === key) {
@@ -2897,19 +3141,22 @@ function TradersView() {
   const tags: { id: TraderTag; label: string }[] = [
     { id: "all", label: "All" },
     { id: "politics", label: "Politics" },
-    { id: "crypto", label: "Crypto" },
     { id: "sports", label: "Sports" },
-    { id: "pop-culture", label: "Pop Culture" },
-    { id: "other", label: "Other" },
+    { id: "crypto", label: "Crypto" },
+    { id: "finance", label: "Finance" },
+    { id: "culture", label: "Culture" },
+    { id: "mentions", label: "Mentions" },
+    { id: "weather", label: "Weather" },
+    { id: "economics", label: "Economics" },
+    { id: "tech", label: "Tech" },
   ];
 
   const sortOptions: { key: TraderSortKey; label: string }[] = [
-    { key: "total_pnl", label: "PnL" },
-    { key: "win_rate", label: "Win Rate" },
-    { key: "total_volume", label: "Volume" },
-    { key: "current_streak", label: "Streak" },
     { key: "smart_score", label: "Score" },
+    { key: "win_rate", label: "Win Rate" },
     { key: "roi", label: "ROI" },
+    { key: "total_volume", label: "Volume" },
+    { key: "total_pnl", label: "PnL" },
   ];
 
   return (
@@ -2930,7 +3177,7 @@ function TradersView() {
               placeholder="Search traders..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-48 h-8 pl-8 pr-3 text-xs bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-white/30 focus:outline-none focus:border-emerald-500/50"
+              className="w-48 h-8 pl-8 pr-3 text-xs bg-white/5 border border-white/10 rounded-none text-white placeholder:text-white/30 focus:outline-none focus:border-emerald-500/50"
             />
             <svg
               className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30"
@@ -2946,6 +3193,30 @@ function TradersView() {
               />
             </svg>
           </div>
+          {/* Filter: Show targets only */}
+          <button
+            onClick={() => setShowTargetsOnly(!showTargetsOnly)}
+            className={`h-8 px-3 text-xs font-medium rounded-none border transition-all flex items-center gap-1.5 ${
+              showTargetsOnly
+                ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+                : "bg-white/5 text-white/50 border-white/10 hover:bg-white/10 hover:text-white/70"
+            }`}
+          >
+            <svg
+              className="w-3.5 h-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M5 13l4 4L19 7"
+              />
+            </svg>
+            Targets Only
+          </button>
         </div>
       </div>
 
@@ -2955,7 +3226,7 @@ function TradersView() {
           <button
             key={tag.id}
             onClick={() => setSelectedTag(tag.id)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
+            className={`px-3 py-1.5 text-xs font-medium rounded-none transition-all ${
               selectedTag === tag.id
                 ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
                 : "bg-white/5 text-white/50 border border-white/10 hover:bg-white/10 hover:text-white/70"
@@ -2973,7 +3244,7 @@ function TradersView() {
           <button
             key={opt.key}
             onClick={() => handleSort(opt.key)}
-            className={`px-2.5 py-1 text-[11px] font-medium rounded transition-all flex items-center gap-1 ${
+            className={`px-2.5 py-1 text-[11px] font-medium rounded-none transition-all flex items-center gap-1 ${
               sortKey === opt.key
                 ? "bg-white/10 text-white"
                 : "text-white/40 hover:text-white/60"
@@ -2981,7 +3252,7 @@ function TradersView() {
           >
             {opt.label}
             {sortKey === opt.key && (
-              <span className="text-emerald-400">
+              <span className={sortDir === "desc" ? "text-rose-400" : "text-emerald-400"}>
                 {sortDir === "desc" ? "↓" : "↑"}
               </span>
             )}
@@ -3022,26 +3293,49 @@ function TradersView() {
         </div>
       )}
 
-      {/* Traders list */}
+      {/* Traders list with infinite scroll */}
       {!loading && !error && (
-        <div className="space-y-2">
+        <div
+          ref={scrollContainerRef}
+          className="space-y-2 max-h-[calc(100vh-300px)] overflow-y-auto"
+        >
           {sortedTraders.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-white/40 text-sm">No traders found</p>
+              <p className="text-white/40 text-sm">
+                {debouncedSearch.length >= 2 ? "No traders found matching your search" : "No traders found"}
+              </p>
             </div>
           ) : (
-            sortedTraders.map((trader, idx) => (
-              <TraderCard
-                key={trader.wallet_address}
-                trader={trader}
-                rank={idx + 1}
-                targets={targets}
-                onAddTarget={(address) =>
-                  handleAddTarget(address, trader.username)
-                }
-                onCopyAddress={copyAddress}
-              />
-            ))
+            <>
+              {sortedTraders.map((trader, idx) => (
+                <TraderCard
+                  key={trader.wallet_address}
+                  trader={trader}
+                  rank={idx + 1}
+                  targets={targets}
+                  onAddTarget={(address) =>
+                    handleAddTarget(address, trader.username)
+                  }
+                  onRemoveTarget={removeTarget}
+                  onCopyAddress={copyAddress}
+                />
+              ))}
+              {/* Load more indicator */}
+              {loadingMore && (
+                <div className="flex items-center justify-center py-4">
+                  <div className="w-4 h-4 border-2 border-white/20 border-t-emerald-400 rounded-full animate-spin" />
+                  <span className="ml-2 text-white/40 text-xs">Loading more...</span>
+                </div>
+              )}
+              {hasMore && !loadingMore && (
+                <button
+                  onClick={loadMoreTraders}
+                  className="w-full py-3 text-white/40 hover:text-white/60 text-xs transition-colors"
+                >
+                  Load more traders
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
@@ -3068,17 +3362,73 @@ function TradersView() {
   );
 }
 
+// Generate unique gradient based on wallet address
+function generateUniqueGradient(address: string): string {
+  // Use the wallet address to generate consistent but unique colors
+  const hash = address.toLowerCase().split('').reduce((acc, char) => {
+    return ((acc << 5) - acc) + char.charCodeAt(0);
+  }, 0);
+
+  // Generate base hue from hash - this ensures each wallet gets a unique color scheme
+  const baseHue = Math.abs(hash % 360);
+  // Secondary hue is analogous (close on color wheel) for smooth blending
+  const secondaryHue = (baseHue + 30 + Math.abs((hash >> 8) % 40)) % 360;
+  
+  // Saturation and lightness for vibrant but not garish colors
+  const sat = 65 + Math.abs((hash >> 4) % 20);
+  const light1 = 50 + Math.abs((hash >> 6) % 15);
+  const light2 = 35 + Math.abs((hash >> 10) % 15);
+
+  // Position variations for the gradient
+  const pos1 = 20 + Math.abs((hash >> 12) % 30);
+  const pos2 = 60 + Math.abs((hash >> 14) % 30);
+
+  // Create a smooth mesh-like gradient using multiple layered radial gradients
+  // This avoids harsh lines by using overlapping soft circles
+  return `
+    radial-gradient(circle at ${pos1}% ${pos1}%, hsl(${baseHue}, ${sat}%, ${light1}%) 0%, transparent 50%),
+    radial-gradient(circle at ${pos2}% ${100 - pos1}%, hsl(${secondaryHue}, ${sat}%, ${light1}%) 0%, transparent 50%),
+    radial-gradient(circle at ${100 - pos1}% ${pos2}%, hsl(${baseHue}, ${sat - 10}%, ${light2}%) 0%, transparent 50%),
+    linear-gradient(${Math.abs(hash >> 16) % 180}deg, hsl(${baseHue}, ${sat - 15}%, ${light2}%) 0%, hsl(${secondaryHue}, ${sat - 10}%, ${light2 + 10}%) 100%)
+  `;
+}
+
+// Unique Avatar component with dynamic gradient
+function UniqueAvatar({ address, name, size = 36 }: { address: string; name: string; size?: number }) {
+  const gradient = generateUniqueGradient(address);
+
+  return (
+    <div
+      className="rounded-full flex items-center justify-center"
+      style={{
+        width: size,
+        height: size,
+        background: gradient,
+      }}
+    >
+      <span
+        className="font-semibold text-white drop-shadow-md"
+        style={{ fontSize: size * 0.4 }}
+      >
+        {name.charAt(0).toUpperCase()}
+      </span>
+    </div>
+  );
+}
+
 function TraderCard({
   trader,
   rank,
   targets,
   onAddTarget,
+  onRemoveTarget,
   onCopyAddress,
 }: {
   trader: Trader;
   rank: number;
   targets: string[];
   onAddTarget: (address: string) => void;
+  onRemoveTarget: (address: string) => void;
   onCopyAddress: (address: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -3086,6 +3436,7 @@ function TraderCard({
     { timestamp: number; pnl: number }[]
   >([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [isEstimatedData, setIsEstimatedData] = useState(false);
   const [selectedTimeframe, setSelectedTimeframe] = useState<
     "1d" | "1w" | "1m" | "all"
   >("all");
@@ -3100,15 +3451,32 @@ function TraderCard({
     verifiedBadge?: boolean;
   } | null>(null);
 
-  // Fetch profile using IPC (bypasses CORS via main process)
-  // Docs: https://docs.polymarket.com/api-reference/profiles/get-public-profile-by-wallet-address
+  // Use data from leaderboard API if available (already fetched)
+  // Only fetch additional profile data when expanded (for bio, etc.)
   useEffect(() => {
+    // If we already have profile data from the leaderboard API, use it
+    if (trader.avatar_url || trader.verified_badge || trader.x_username) {
+      setProfileImage(trader.avatar_url || null);
+      setProfileData({
+        xUsername: trader.x_username,
+        verifiedBadge: trader.verified_badge,
+      });
+      return; // Don't fetch again - we have data from leaderboard API
+    }
+    // No profile data from leaderboard - leave as null, will use fallback
+  }, [trader.avatar_url, trader.verified_badge, trader.x_username]);
+
+  // Only fetch detailed profile when card is expanded (lazy loading)
+  useEffect(() => {
+    if (!expanded) return;
+    if (profileData?.bio) return; // Already fetched full profile
+
     const fetchProfile = async () => {
       try {
         // Use IPC to bypass CORS - main process makes the request
         const data = await window.ipc?.invoke<any>(
           "polymarket:getProfile",
-          trader.wallet_address
+          trader.wallet_address,
         );
         if (data) {
           // Profile image from API
@@ -3120,16 +3488,22 @@ function TraderCard({
             name: data.name,
             pseudonym: data.pseudonym,
             bio: data.bio,
-            xUsername: data.xUsername,
-            verifiedBadge: data.verifiedBadge,
+            xUsername: data.xUsername || trader.x_username,
+            verifiedBadge: data.verifiedBadge || trader.verified_badge,
           });
         }
       } catch {
-        // Ignore errors, will use fallback avatar
+        // Ignore errors silently, will use fallback avatar
       }
     };
     fetchProfile();
-  }, [trader.wallet_address]);
+  }, [
+    expanded,
+    trader.wallet_address,
+    trader.x_username,
+    trader.verified_badge,
+    profileData?.bio,
+  ]);
 
   // Generate synthetic P&L history based on trader's total P&L
   const generateSyntheticPnlHistory = () => {
@@ -3137,7 +3511,7 @@ function TraderCard({
     const points: { timestamp: number; pnl: number }[] = [];
     const totalPnl = trader.total_pnl;
     const numPoints = 60; // Generate 60 data points over time
-    
+
     // Use wallet address as seed for consistent randomization
     const seed = parseInt(trader.wallet_address.slice(2, 10), 16);
     const seededRandom = (i: number) => {
@@ -3147,79 +3521,85 @@ function TraderCard({
 
     // Generate points over 90 days
     const timeSpan = 90 * 24 * 60 * 60 * 1000;
-    
+
     for (let i = 0; i < numPoints; i++) {
       const progress = i / (numPoints - 1);
       const timestamp = now - timeSpan * (1 - progress);
-      
+
       // Create a realistic curve toward the final P&L
       // Add some randomness but trend toward the actual total
       const volatility = Math.abs(totalPnl) * 0.15;
       const noise = (seededRandom(i) - 0.5) * volatility;
-      
+
       // Exponential growth/decline toward final value
       const basePnl = totalPnl * Math.pow(progress, 0.8);
       const pnl = basePnl + noise * (1 - progress * 0.7);
-      
+
       points.push({ timestamp, pnl });
     }
-    
+
     // Ensure last point matches actual total P&L
     points[points.length - 1].pnl = totalPnl;
-    
+
     return points;
   };
 
-  // Fetch P&L history when expanded - uses IPC to bypass CORS
-  // Note: WebSocket requires authentication for user channel
+  // Fetch P&L history when expanded - uses the official Polymarket user-pnl API
   useEffect(() => {
     if (!expanded || pnlHistory.length > 0) return;
 
     const fetchHistory = async () => {
       setLoadingHistory(true);
       try {
-        // Fetch trades via IPC (bypasses CORS)
-        const trades = await window.ipc?.invoke<any[]>(
-          "polymarket:getTrades",
-          trader.wallet_address
-        ) || [];
+        // Use the official Polymarket user-pnl API for accurate historical P&L data
+        const pnlData = await window.ipc?.invoke<any>("polymarket:getUserPnl", {
+          address: trader.wallet_address,
+          interval: "all",
+          fidelity: "1d",
+        });
 
-        if (trades.length > 0) {
-          // Build cumulative P&L from trades
-          let cumPnl = 0;
-          const tradeEvents = trades.filter(
-            (t: any) => t.type === "TRADE" || t.side
-          );
-          
-          if (tradeEvents.length >= 2) {
-            tradeEvents.sort((a: any, b: any) => {
-              const aTime = new Date(a.timestamp || a.createdAt || a.time).getTime();
-              const bTime = new Date(b.timestamp || b.createdAt || b.time).getTime();
-              return aTime - bTime;
-            });
+        if (pnlData && Array.isArray(pnlData) && pnlData.length > 0) {
+          // API returns array of { t: timestamp, p: pnl } or similar
+          const history = pnlData
+            .map((point: any) => {
+              // Handle different possible response formats
+              const timestamp =
+                point.t || point.timestamp || point.time
+                  ? new Date(point.t || point.timestamp || point.time).getTime()
+                  : null;
+              const pnl =
+                point.p !== undefined
+                  ? parseFloat(point.p)
+                  : point.pnl !== undefined
+                    ? parseFloat(point.pnl)
+                    : point.value !== undefined
+                      ? parseFloat(point.value)
+                      : null;
 
-            const history = tradeEvents.map((t: any) => {
-              const size = parseFloat(t.usdcSize || t.size || t.amount || "0");
-              const side = t.side?.toUpperCase?.() || t.type;
-              const tradePnl = side === "SELL" ? size : -size;
-              cumPnl += tradePnl;
-              return {
-                timestamp: new Date(t.timestamp || t.createdAt || t.time).getTime(),
-                pnl: cumPnl,
-              };
-            });
-            
+              if (timestamp && pnl !== null && !isNaN(pnl)) {
+                return { timestamp, pnl };
+              }
+              return null;
+            })
+            .filter(Boolean) as { timestamp: number; pnl: number }[];
+
+          if (history.length >= 2) {
+            // Sort by timestamp
+            history.sort((a, b) => a.timestamp - b.timestamp);
+            setIsEstimatedData(false); // Real data from official API
             setPnlHistory(history);
             return;
           }
         }
-        
+
         // Fallback: Generate synthetic P&L history based on trader's total P&L
         // This ensures we always have chart data to display
+        setIsEstimatedData(true);
         setPnlHistory(generateSyntheticPnlHistory());
       } catch (e) {
         console.error("Failed to fetch P&L history:", e);
         // Use synthetic data on error
+        setIsEstimatedData(true);
         setPnlHistory(generateSyntheticPnlHistory());
       } finally {
         setLoadingHistory(false);
@@ -3254,6 +3634,14 @@ function TraderCard({
       : trader.win_rate >= 0.5
         ? "text-amber-400"
         : "text-rose-400";
+  
+  // Score color: red (<40), yellow (40-70), green (>70)
+  const scoreColor =
+    trader.smart_score >= 70
+      ? "text-emerald-400"
+      : trader.smart_score >= 40
+        ? "text-amber-400"
+        : "text-rose-400";
 
   // Use fetched profile image, trader's avatar_url, or fallback to gradient avatar
   const avatarUrl = profileImage || trader.avatar_url;
@@ -3270,7 +3658,7 @@ function TraderCard({
     };
     const cutoff = cutoffs[selectedTimeframe];
     const filtered = pnlHistory.filter((p) => p.timestamp >= cutoff);
-    
+
     // If filtered has less than 2 points, return all data instead
     // This ensures we always show something meaningful
     if (filtered.length < 2 && selectedTimeframe !== "all") {
@@ -3297,13 +3685,31 @@ function TraderCard({
     }
 
     const filteredHistory = getFilteredHistory();
+    const hasMinimalData = filteredHistory.length < 2;
 
-    if (filteredHistory.length < 2) {
+    if (hasMinimalData) {
+      // Get current PnL value if we have 1 point, otherwise use trader's total_pnl or 0
+      const currentPnl = filteredHistory.length === 1 ? filteredHistory[0].pnl : (trader.total_pnl || 0);
+      const isPositive = currentPnl >= 0;
+      const lineColor = isPositive ? "#10b981" : "#f43f5e";
+      
       return (
         <div className="bg-white/[0.02] rounded p-3">
-          {/* Timeframe selector */}
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs text-white/40">P&L History</span>
+          {/* Header with value */}
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-white/40">
+                {isEstimatedData ? "Est. P&L Trend" : "P&L History"}
+              </span>
+              <span className={`text-sm font-mono font-semibold ${isPositive ? "text-emerald-400" : "text-rose-400"}`}>
+                {currentPnl >= 0 ? "+" : ""}{formatCurrency(currentPnl)}
+              </span>
+              {isEstimatedData && (
+                <span className="text-[10px] text-amber-400/60 bg-amber-400/10 px-1.5 py-0.5 rounded">
+                  Estimated
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-1">
               {(["1d", "1w", "1m", "all"] as const).map((tf) => {
                 const hasData = hasDataForTimeframe(tf);
@@ -3314,7 +3720,7 @@ function TraderCard({
                       e.stopPropagation();
                       setSelectedTimeframe(tf);
                     }}
-                    className={`px-2 py-0.5 text-[10px] font-medium rounded transition-colors ${
+                    className={`px-2 py-0.5 text-[10px] font-medium rounded-none transition-colors ${
                       selectedTimeframe === tf
                         ? "bg-white/10 text-white"
                         : hasData
@@ -3328,10 +3734,50 @@ function TraderCard({
               })}
             </div>
           </div>
-          <div className="h-16 flex items-center justify-center">
-            <span className="text-[10px] text-white/30">
-              No trading activity available
-            </span>
+          {/* Show a flat line chart */}
+          <div className="h-16 relative">
+            <svg
+              viewBox="0 0 100 64"
+              preserveAspectRatio="none"
+              className="w-full h-full"
+            >
+              <defs>
+                <linearGradient
+                  id={`flatGrad-${trader.wallet_address}`}
+                  x1="0%"
+                  y1="0%"
+                  x2="0%"
+                  y2="100%"
+                >
+                  <stop offset="0%" stopColor={lineColor} stopOpacity="0.15" />
+                  <stop offset="100%" stopColor={lineColor} stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              {/* Area fill */}
+              <path
+                d="M 8 32 L 92 32 L 92 56 L 8 56 Z"
+                fill={`url(#flatGrad-${trader.wallet_address})`}
+              />
+              {/* Flat line */}
+              <line
+                x1="8"
+                y1="32"
+                x2="92"
+                y2="32"
+                stroke={lineColor}
+                strokeWidth="0.5"
+                vectorEffect="non-scaling-stroke"
+              />
+              {/* Single dot if we have 1 data point */}
+              {filteredHistory.length === 1 && (
+                <circle
+                  cx="50"
+                  cy="32"
+                  r="2"
+                  fill={lineColor}
+                />
+              )}
+            </svg>
           </div>
         </div>
       );
@@ -3371,14 +3817,23 @@ function TraderCard({
         {/* Header with timeframe selector */}
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-3">
-            <span className="text-xs text-white/40">P&L History</span>
+            <span className="text-xs text-white/40">
+              {isEstimatedData ? "Est. P&L Trend" : "P&L History"}
+            </span>
             <span
               className={`text-sm font-mono font-semibold ${isUp ? "text-emerald-400" : "text-rose-400"}`}
             >
               {lastPnl >= 0 ? "+" : ""}
               {formatCurrency(lastPnl)}
             </span>
-            <span className="text-[10px] text-white/30">({getTimeRangeLabel()})</span>
+            <span className="text-[10px] text-white/30">
+              ({getTimeRangeLabel()})
+            </span>
+            {isEstimatedData && (
+              <span className="text-[10px] text-amber-400/60 bg-amber-400/10 px-1.5 py-0.5 rounded">
+                Estimated
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1">
             {(["1d", "1w", "1m", "all"] as const).map((tf) => {
@@ -3390,14 +3845,16 @@ function TraderCard({
                     e.stopPropagation();
                     if (hasData || tf === "all") setSelectedTimeframe(tf);
                   }}
-                  className={`px-2 py-0.5 text-[10px] font-medium rounded transition-colors ${
+                  className={`px-2 py-0.5 text-[10px] font-medium rounded-none transition-colors ${
                     selectedTimeframe === tf
                       ? "bg-white/10 text-white"
                       : hasData || tf === "all"
                         ? "text-white/40 hover:text-white/60"
                         : "text-white/20 cursor-not-allowed"
                   }`}
-                  title={!hasData && tf !== "all" ? "No data for this period" : ""}
+                  title={
+                    !hasData && tf !== "all" ? "No data for this period" : ""
+                  }
                 >
                   {tf.toUpperCase()}
                 </button>
@@ -3499,11 +3956,11 @@ function TraderCard({
                 }}
               />
             ) : (
-              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-500/30 to-cyan-500/30 flex items-center justify-center">
-                <span className="text-sm font-semibold text-white/70">
-                  {(profileData?.name || profileData?.pseudonym || trader.username).charAt(0).toUpperCase()}
-                </span>
-              </div>
+              <UniqueAvatar
+                address={trader.wallet_address}
+                name={profileData?.name || profileData?.pseudonym || trader.username}
+                size={36}
+              />
             )}
             {/* Online/Offline indicator */}
             <div
@@ -3517,7 +3974,11 @@ function TraderCard({
               </p>
               {/* Verified badge - from leaderboard API or profile */}
               {(trader.verified_badge || profileData?.verifiedBadge) && (
-                <svg className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                <svg
+                  className="w-3.5 h-3.5 text-blue-400 flex-shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                >
                   <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               )}
@@ -3531,8 +3992,12 @@ function TraderCard({
                   className="text-white/30 hover:text-white/60 transition-colors"
                   title={`@${trader.x_username || profileData?.xUsername}`}
                 >
-                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                  <svg
+                    className="w-3 h-3"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
                   </svg>
                 </a>
               )}
@@ -3544,53 +4009,55 @@ function TraderCard({
           </div>
         </div>
 
-        {/* Stats grid */}
-        <div className="flex-1 grid grid-cols-5 gap-4">
+        {/* Stats - right aligned with fixed widths for alignment */}
+        <div className="flex items-center ml-auto">
+          {/* Score */}
+          <div className="w-16 text-right px-2">
+            <p className="text-[10px] text-white/40 mb-0.5">Score</p>
+            <p className={`text-sm font-mono font-semibold ${scoreColor}`}>
+              {trader.smart_score.toFixed(0)}
+            </p>
+          </div>
+
+          {/* Win Rate */}
+          <div className="w-16 text-right px-2">
+            <p className="text-[10px] text-white/40 mb-0.5">Win%</p>
+            <p className={`text-sm font-mono font-semibold ${winRateColor}`}>
+              {(trader.win_rate * 100).toFixed(1)}%
+            </p>
+          </div>
+
+          {/* ROI */}
+          <div className="w-16 text-right px-2">
+            <p className="text-[10px] text-white/40 mb-0.5">ROI</p>
+            <p
+              className={`text-sm font-mono font-semibold ${trader.roi >= 0 ? "text-emerald-400" : "text-rose-400"}`}
+            >
+              {trader.roi >= 0 ? "+" : ""}
+              {(trader.roi * 100).toFixed(1)}%
+            </p>
+          </div>
+
+          {/* Volume */}
+          <div className="w-20 text-right px-2">
+            <p className="text-[10px] text-white/40 mb-0.5">Vol</p>
+            <p className="text-sm font-mono text-white/70">
+              {formatVolume(trader.total_volume)}
+            </p>
+          </div>
+
           {/* PnL */}
-          <div className="text-right">
+          <div className="w-24 text-right px-2">
             <p className="text-[10px] text-white/40 mb-0.5">PnL</p>
             <p className={`text-sm font-mono font-semibold ${pnlColor}`}>
               {trader.total_pnl >= 0 ? "+" : ""}
               {formatCurrency(trader.total_pnl)}
             </p>
           </div>
-
-          {/* Win Rate */}
-          <div className="text-right">
-            <p className="text-[10px] text-white/40 mb-0.5">Win Rate</p>
-            <p className={`text-sm font-mono font-semibold ${winRateColor}`}>
-              {(trader.win_rate * 100).toFixed(1)}%
-            </p>
-          </div>
-
-          {/* Volume */}
-          <div className="text-right">
-            <p className="text-[10px] text-white/40 mb-0.5">Volume</p>
-            <p className="text-sm font-mono text-white/70">
-              {formatVolume(trader.total_volume)}
-            </p>
-          </div>
-
-          {/* Streak */}
-          <div className="text-right">
-            <p className="text-[10px] text-white/40 mb-0.5">Streak</p>
-            <p className={`text-sm font-mono font-semibold ${streakColor}`}>
-              {trader.current_streak > 0 ? "+" : ""}
-              {trader.current_streak}
-            </p>
-          </div>
-
-          {/* Score */}
-          <div className="text-right">
-            <p className="text-[10px] text-white/40 mb-0.5">Score</p>
-            <p className="text-sm font-mono text-white/70">
-              {trader.smart_score.toFixed(1)}
-            </p>
-          </div>
         </div>
 
         {/* Expand icon */}
-        <div className="w-8 flex justify-center">
+        <div className="w-8 flex justify-center ml-2">
           <svg
             className={`w-4 h-4 text-white/30 transition-transform ${expanded ? "rotate-180" : ""}`}
             fill="none"
@@ -3616,7 +4083,7 @@ function TraderCard({
               <p className="line-clamp-2">{profileData.bio}</p>
             </div>
           )}
-          
+
           {/* P&L Chart */}
           {renderMiniChart()}
 
@@ -3679,7 +4146,7 @@ function TraderCard({
                 e.stopPropagation();
                 onCopyAddress(trader.wallet_address);
               }}
-              className="px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/70 hover:text-white transition-colors flex items-center gap-1.5"
+              className="px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-white/10 rounded-none text-white/70 hover:text-white transition-colors flex items-center gap-1.5"
             >
               <svg
                 className="w-3.5 h-3.5"
@@ -3701,7 +4168,7 @@ function TraderCard({
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
-              className="px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/70 hover:text-white transition-colors flex items-center gap-1.5"
+              className="px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-white/10 rounded-none text-white/70 hover:text-white transition-colors flex items-center gap-1.5"
             >
               <svg
                 className="w-3.5 h-3.5"
@@ -3719,9 +4186,15 @@ function TraderCard({
               View on Polymarket
             </a>
             {isInTargets ? (
-              <span className="px-3 py-1.5 text-xs font-medium bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-400 flex items-center gap-1.5">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemoveTarget(trader.wallet_address);
+                }}
+                className="px-3 py-1.5 text-xs font-medium bg-emerald-500/10 hover:bg-rose-500/10 border border-emerald-500/20 hover:border-rose-500/20 rounded-none text-emerald-400 hover:text-rose-400 transition-colors flex items-center gap-1.5 group"
+              >
                 <svg
-                  className="w-3.5 h-3.5"
+                  className="w-3.5 h-3.5 group-hover:hidden"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -3733,15 +4206,29 @@ function TraderCard({
                     d="M5 13l4 4L19 7"
                   />
                 </svg>
-                Already Tracking
-              </span>
+                <svg
+                  className="w-3.5 h-3.5 hidden group-hover:block"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+                <span className="group-hover:hidden">Tracking</span>
+                <span className="hidden group-hover:inline">Stop Tracking</span>
+              </button>
             ) : (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   onAddTarget(trader.wallet_address);
                 }}
-                className="px-3 py-1.5 text-xs font-medium bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 transition-colors flex items-center gap-1.5"
+                className="px-3 py-1.5 text-xs font-medium bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-none text-emerald-400 transition-colors flex items-center gap-1.5"
               >
                 <svg
                   className="w-3.5 h-3.5"

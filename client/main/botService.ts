@@ -129,6 +129,7 @@ export class BotService {
 
   constructor(dataDir: string) {
     this.dataDir = dataDir;
+    this.isReconnecting = false;
     this.stats = {
       status: "stopped",
       connected: false,
@@ -448,6 +449,7 @@ export class BotService {
 
     // Set running to false FIRST to prevent any reconnection attempts
     this.running = false;
+    this.isReconnecting = false;
     this.stats.status = "stopped";
 
     // Clear all timers immediately
@@ -522,6 +524,9 @@ export class BotService {
     return true;
   }
 
+  // Flag to prevent concurrent reconnection attempts
+  private isReconnecting: boolean = false;
+
   // Properly clean up WebSocket client and all its event handlers
   private async cleanupWebSocket(): Promise<void> {
     if (!this.wsClient) return;
@@ -532,33 +537,51 @@ export class BotService {
         this.wsClient.removeAllListeners();
       }
 
-      // Unsubscribe from all topics
-      try {
-        this.wsClient.unsubscribe?.({ subscriptions: [] });
-      } catch (e) {
-        // Ignore
-      }
-
-      // Disable auto-reconnect
+      // Disable auto-reconnect FIRST
       if (this.wsClient.options) {
         this.wsClient.options.autoReconnect = false;
       }
 
-      // Force disconnect
-      if (typeof this.wsClient.disconnect === 'function') {
-        this.wsClient.disconnect();
+      // Only try to unsubscribe/disconnect if the socket is actually open
+      const readyState = this.wsClient._ws?.readyState ?? this.wsClient.readyState;
+      if (readyState === 1) { // OPEN
+        // Unsubscribe from all topics
+        try {
+          this.wsClient.unsubscribe?.({ subscriptions: [] });
+        } catch (e) {
+          // Ignore
+        }
+
+        // Force disconnect
+        if (typeof this.wsClient.disconnect === 'function') {
+          this.wsClient.disconnect();
+        }
       }
-      if (typeof this.wsClient.close === 'function') {
-        this.wsClient.close();
-      }
+      // For non-OPEN states, just null out the client - don't try to close
+      // This prevents "WebSocket was closed before the connection was established" errors
     } catch (e) {
       // Ignore close errors
     } finally {
       this.wsClient = null;
+      this.isReconnecting = false;
     }
   }
 
   private async connectWebSocket() {
+    // Prevent concurrent reconnection attempts
+    if (this.isReconnecting) {
+      this.log("debug", "Skipping connectWebSocket - already reconnecting");
+      return;
+    }
+
+    // Don't connect if bot isn't running
+    if (!this.running) {
+      this.log("debug", "Skipping connectWebSocket - bot not running");
+      return;
+    }
+
+    this.isReconnecting = true;
+
     try {
       // Clean up existing WebSocket client before creating a new one
       await this.cleanupWebSocket();
@@ -579,6 +602,7 @@ export class BotService {
             this.stats.connected = true;
             this.messageCount = 0;
             this.targetTradeCount = 0;
+            this.isReconnecting = false; // Clear reconnecting flag on successful connect
             this.resetReconnectState(); // Reset backoff on successful connect
 
             // Subscribe to trades and orders_matched
@@ -599,6 +623,7 @@ export class BotService {
             this.emit({ type: "status", data: this.stats });
           } catch (err: any) {
             this.log("error", `Error in onConnect: ${err.message}`);
+            this.isReconnecting = false;
           }
         },
         onMessage: (_: any, message: any) => {
@@ -632,15 +657,23 @@ export class BotService {
           try {
             this.log("debug", "WebSocket status change", { status });
 
-            if (status === ConnectionStatus.DISCONNECTED) {
+            if (status === ConnectionStatus.CONNECTED) {
+              // Already handled in onConnect, but ensure flags are set
+              this.connected = true;
+              this.stats.connected = true;
+              this.isReconnecting = false;
+            } else if (status === ConnectionStatus.CONNECTING) {
+              // Just log, don't do anything - wait for CONNECTED or DISCONNECTED
+              this.log("debug", "WebSocket connecting...");
+            } else if (status === ConnectionStatus.DISCONNECTED) {
               this.log("warn", "WebSocket disconnected");
               this.connected = false;
               this.stats.connected = false;
               this.emit({ type: "disconnected" });
               this.emit({ type: "status", data: this.stats });
 
-              // Schedule reconnect
-              if (this.running) {
+              // Schedule reconnect only if running and not already reconnecting
+              if (this.running && !this.isReconnecting) {
                 this.scheduleReconnect();
               }
             }
@@ -648,7 +681,9 @@ export class BotService {
             this.log("error", `Error in onStatusChange: ${err.message}`);
           }
         },
-        autoReconnect: true,
+        // Disable built-in auto-reconnect - we handle reconnection ourselves
+        // This prevents race conditions between the client's reconnect and ours
+        autoReconnect: false,
         pingInterval: 15000,
       });
 
@@ -667,7 +702,8 @@ export class BotService {
         data: { message: error.message, context: "websocket" },
       });
 
-      if (this.running) {
+      this.isReconnecting = false; // Reset on error
+      if (this.running && !this.isReconnecting) {
         this.scheduleReconnect();
       }
     }
@@ -675,15 +711,22 @@ export class BotService {
 
   // Reconnection state for exponential backoff
   private reconnectAttempts: number = 0;
-  private readonly RECONNECT_BASE_MS = 100;
-  private readonly RECONNECT_MAX_MS = 5000;
+  private readonly RECONNECT_BASE_MS = 1000;  // Start with 1 second
+  private readonly RECONNECT_MAX_MS = 30000;  // Max 30 seconds
 
   private scheduleReconnect() {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
+    // Don't schedule if already reconnecting or not running
+    if (this.isReconnecting || !this.running) {
+      this.log("debug", `Skipping scheduleReconnect - isReconnecting: ${this.isReconnecting}, running: ${this.running}`);
+      return;
     }
 
-    // Exponential backoff with jitter: 100ms, 200ms, 400ms, 800ms... up to 5000ms
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    // Exponential backoff with jitter: 1s, 2s, 4s, 8s... up to 30s
     const baseDelay = Math.min(
       this.RECONNECT_BASE_MS * Math.pow(2, this.reconnectAttempts),
       this.RECONNECT_MAX_MS,
@@ -699,7 +742,7 @@ export class BotService {
     );
 
     this.reconnectTimer = setTimeout(() => {
-      if (this.running) {
+      if (this.running && !this.isReconnecting) {
         this.log("info", "Attempting to reconnect...");
         this.connectWebSocket();
       }

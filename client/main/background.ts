@@ -1583,8 +1583,12 @@ ipcMain.handle("logs:add", async (_event, entry) => {
 // ========== Polymarket API Proxies (bypass CORS) ==========
 
 // Fetch profile from gamma-api (CORS-free from main process)
+// Now with shorter timeout and silent error handling
 ipcMain.handle("polymarket:getProfile", async (_event, address: string) => {
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+    
     const response = await fetch(
       `https://gamma-api.polymarket.com/public-profile?address=${address}`,
       {
@@ -1592,30 +1596,36 @@ ipcMain.handle("polymarket:getProfile", async (_event, address: string) => {
           Accept: "application/json",
           "Content-Type": "application/json",
         },
+        signal: controller.signal,
       },
     );
+    clearTimeout(timeoutId);
+    
     if (!response.ok) {
       return null;
     }
     return await response.json();
-  } catch (error) {
-    console.error("Failed to fetch profile:", error);
+  } catch {
+    // Silently return null - network errors are expected
     return null;
   }
 });
 
-// Batch fetch profiles (more efficient)
+// Batch fetch profiles (more efficient) - with timeout
 ipcMain.handle(
   "polymarket:getProfiles",
   async (_event, addresses: string[]) => {
     const results: Record<string, any> = {};
 
-    // Fetch in parallel with rate limiting (max 10 concurrent)
-    const batchSize = 10;
+    // Fetch in parallel with rate limiting (max 5 concurrent, shorter timeout)
+    const batchSize = 5;
     for (let i = 0; i < addresses.length; i += batchSize) {
       const batch = addresses.slice(i, i + batchSize);
       const promises = batch.map(async (address) => {
         try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
+          
           const response = await fetch(
             `https://gamma-api.polymarket.com/public-profile?address=${address}`,
             {
@@ -1623,13 +1633,16 @@ ipcMain.handle(
                 Accept: "application/json",
                 "Content-Type": "application/json",
               },
+              signal: controller.signal,
             },
           );
+          clearTimeout(timeoutId);
+          
           if (response.ok) {
             results[address.toLowerCase()] = await response.json();
           }
         } catch {
-          // Ignore individual errors
+          // Ignore individual errors silently
         }
       });
       await Promise.all(promises);
@@ -1642,20 +1655,25 @@ ipcMain.handle(
 // Fetch available tags from gamma-api
 ipcMain.handle("polymarket:getTags", async () => {
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    
     const response = await fetch(
       "https://gamma-api.polymarket.com/tags?limit=100",
       {
         headers: {
           Accept: "application/json",
         },
+        signal: controller.signal,
       },
     );
+    clearTimeout(timeoutId);
+    
     if (!response.ok) {
       return [];
     }
     return await response.json();
-  } catch (error) {
-    console.error("Failed to fetch tags:", error);
+  } catch {
     return [];
   }
 });
@@ -1665,21 +1683,92 @@ ipcMain.handle(
   "polymarket:getTrades",
   async (_event, address: string, limit: number = 500) => {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s for trades
+      
       const response = await fetch(
         `https://data-api.polymarket.com/trades?user=${address}&limit=${limit}`,
         {
           headers: {
             Accept: "application/json",
           },
+          signal: controller.signal,
         },
       );
+      clearTimeout(timeoutId);
+      
       if (!response.ok) {
         return [];
       }
       return await response.json();
-    } catch (error) {
-      console.error("Failed to fetch trades:", error);
+    } catch {
       return [];
+    }
+  },
+);
+
+// Fetch user P&L history from Polymarket's user-pnl API
+// This is the official API for getting accurate historical P&L data
+ipcMain.handle(
+  "polymarket:getUserPnl",
+  async (
+    _event,
+    options: {
+      address: string;
+      interval?: string; // "1d", "1w", "1m", "3m", "1y", "all"
+      fidelity?: string; // "1h", "1d", etc.
+    },
+  ) => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      // Map our intervals to API intervals
+      const intervalMap: Record<string, string> = {
+        "1d": "1d",
+        "1w": "1w",
+        "1m": "1m",
+        "3m": "3m",
+        "1y": "1y",
+        all: "all",
+      };
+
+      // Determine fidelity based on interval
+      const fidelityMap: Record<string, string> = {
+        "1d": "1h",
+        "1w": "4h",
+        "1m": "1d",
+        "3m": "1d",
+        "1y": "1w",
+        all: "1w",
+      };
+
+      const interval = intervalMap[options.interval || "all"] || "all";
+      const fidelity = options.fidelity || fidelityMap[interval] || "1d";
+
+      const url = `https://user-pnl-api.polymarket.com/user-pnl?user_address=${options.address}&interval=${interval}&fidelity=${fidelity}`;
+      console.log("[UserPnl] Fetching:", url);
+
+      const response = await fetch(url, {
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        console.error("[UserPnl] Error:", response.status);
+        return null;
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (e) {
+      console.error("[UserPnl] Failed:", e);
+      return null;
     }
   },
 );
@@ -1703,6 +1792,9 @@ ipcMain.handle(
     },
   ) => {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+      
       const params = new URLSearchParams();
       params.set("category", options.category || "OVERALL");
       params.set("timePeriod", options.timePeriod || "ALL");
@@ -1717,7 +1809,9 @@ ipcMain.handle(
         headers: {
           Accept: "application/json",
         },
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         console.error(
@@ -1733,9 +1827,88 @@ ipcMain.handle(
         `[Leaderboard] Got ${Array.isArray(data) ? data.length : 0} traders for ${options.category}`,
       );
       return data;
-    } catch (error) {
-      console.error("Failed to fetch leaderboard:", error);
+    } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        console.error("[Leaderboard] Request timed out");
+      } else {
+        console.error("[Leaderboard] Failed:", error?.message || error);
+      }
       return [];
+    }
+  },
+);
+
+// Search leaderboard traders by name/address
+ipcMain.handle(
+  "polymarket:searchTraders",
+  async (
+    _event,
+    options: {
+      query: string;
+      limit?: number;
+    },
+  ) => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      // Search using the gamma API profile endpoint
+      const query = encodeURIComponent(options.query || "");
+      const url = `https://gamma-api.polymarket.com/users?_limit=${options.limit || 20}&userName_contains=${query}`;
+      console.log("[Search] Fetching:", url);
+
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        console.error("[Search] API error:", response.status);
+        return [];
+      }
+
+      const data = await response.json();
+      console.log(`[Search] Got ${Array.isArray(data) ? data.length : 0} results`);
+      return data;
+    } catch (error: any) {
+      console.error("[Search] Failed:", error?.message || error);
+      return [];
+    }
+  },
+);
+
+// Fetch user profile with image
+ipcMain.handle(
+  "polymarket:getUserProfile",
+  async (_event, address: string) => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      // Try gamma API first
+      const url = `https://gamma-api.polymarket.com/users/${address.toLowerCase()}`;
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        return {
+          address: data.proxyWallet || address,
+          username: data.userName || data.name,
+          profileImage: data.profileImage || data.avatarUrl || data.profilePicture,
+          bio: data.bio,
+          xUsername: data.xUsername || data.twitterHandle,
+          verified: data.verifiedBadge || data.verified,
+        };
+      }
+      return null;
+    } catch (error: any) {
+      console.error("[Profile] Failed:", error?.message || error);
+      return null;
     }
   },
 );

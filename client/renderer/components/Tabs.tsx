@@ -20,6 +20,7 @@ type TabKind =
   | "portfolio"
   | "performance"
   | "traders"
+  | "whales"
   | "settings";
 
 type Tab = {
@@ -105,6 +106,22 @@ const TabIcon = ({ kind, active }: { kind: TabKind; active: boolean }) => {
           />
         </svg>
       );
+    case "whales":
+      return (
+        <svg
+          className={`${baseClass} ${color}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={1.75}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
+        </svg>
+      );
     case "settings":
       return (
         <svg
@@ -134,6 +151,7 @@ const defaultTabs: Tab[] = [
   { id: "portfolio", title: "Portfolio", kind: "portfolio" },
   { id: "performance", title: "Performance", kind: "performance" },
   { id: "traders", title: "Traders", kind: "traders" },
+  { id: "whales", title: "Whales", kind: "whales" },
   { id: "settings", title: "Settings", kind: "settings" },
 ];
 
@@ -277,6 +295,7 @@ export default function Tabs({
             <PerformanceView stats={perfStats} trades={trades} />
           )}
           {active?.kind === "traders" && <TradersView />}
+          {active?.kind === "whales" && <WhalesView />}
           {active?.kind === "settings" && (
             <SettingsView
               config={config}
@@ -1481,21 +1500,27 @@ function PerformanceChart({
                 d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4v16"
               />
             </svg>
-            <p className="text-white/30 text-sm">Performance chart will appear here</p>
-            <p className="text-white/20 text-xs mt-1">Start trading to see your progress</p>
+            <p className="text-white/30 text-sm">
+              Performance chart will appear here
+            </p>
+            <p className="text-white/20 text-xs mt-1">
+              Start trading to see your progress
+            </p>
           </div>
         </div>
         {/* Time range buttons - disabled state */}
         <div className="flex items-center justify-center gap-0 pt-2">
-          {(["1D", "1W", "1M", "3M", "1Y", "ALL"] as TimeRange[]).map((range) => (
-            <button
-              key={range}
-              disabled
-              className="px-4 py-2 text-[13px] font-medium text-white/20 cursor-not-allowed"
-            >
-              {range}
-            </button>
-          ))}
+          {(["1D", "1W", "1M", "3M", "1Y", "ALL"] as TimeRange[]).map(
+            (range) => (
+              <button
+                key={range}
+                disabled
+                className="px-4 py-2 text-[13px] font-medium text-white/20 cursor-not-allowed"
+              >
+                {range}
+              </button>
+            ),
+          )}
         </div>
       </div>
     );
@@ -2588,9 +2613,9 @@ function Toast({
   onClose: () => void;
 }) {
   useEffect(() => {
-    const timer = setTimeout(onClose, 2000);
+    const timer = setTimeout(onClose, 3000);
     return () => clearTimeout(timer);
-  }, [onClose]);
+  }, [message]); // Reset timer when message changes
 
   const textColor =
     type === "success"
@@ -2685,7 +2710,9 @@ function TradersView() {
   } | null>(null);
 
   const showToast = (message: string, type: "success" | "error" | "info") => {
-    setToast({ message, type });
+    // Clear existing toast first to ensure timer resets
+    setToast(null);
+    setTimeout(() => setToast({ message, type }), 10);
   };
 
   // Fetch current targets from config
@@ -2800,7 +2827,8 @@ function TradersView() {
         if (Array.isArray(results) && results.length > 0) {
           const mapped: Trader[] = results.map((t: any, idx: number) => ({
             wallet_address: t.proxyWallet || t.address || "",
-            username: t.userName || t.name || `${(t.proxyWallet || "").slice(0, 8)}...`,
+            username:
+              t.userName || t.name || `${(t.proxyWallet || "").slice(0, 8)}...`,
             avatar_url: t.profileImage || t.avatarUrl || "",
             total_pnl: parseFloat(t.pnl || "0"),
             total_volume: parseFloat(t.vol || t.volume || "0"),
@@ -2855,38 +2883,34 @@ function TradersView() {
         tech: "TECH",
       };
 
-      let newTraders: Trader[] = [];
+      // Map sort key to API orderBy parameter
+      const sortToOrderBy: Record<string, string> = {
+        total_pnl: "PNL",
+        total_volume: "VOL",
+        smart_score: "PNL",
+        win_rate: "PNL",
+        roi: "PNL",
+        current_streak: "PNL",
+      };
 
-      if (selectedTag === "all") {
-        // For "all", fetch from multiple categories with offset
-        const categories = ["POLITICS", "CRYPTO", "SPORTS", "CULTURE"];
-        const perCategoryLimit = 15;
-        const perCategoryOffset = Math.floor((offset + 50) / categories.length);
-        
-        const promises = categories.map((cat) =>
-          window.ipc.invoke("polymarket:getLeaderboard", {
-            category: cat,
-            timePeriod: "ALL",
-            orderBy: "PNL",
-            limit: perCategoryLimit,
-            offset: perCategoryOffset,
-          }),
-        );
-        const results = await Promise.all(promises);
-        
-        // Combine all results
-        const combined: any[] = [];
-        results.forEach((result, catIdx) => {
-          if (Array.isArray(result)) {
-            result.forEach((t: any) => {
-              combined.push({ ...t, apiCategory: categories[catIdx] });
-            });
-          }
-        });
+      const apiCategory = categoryMap[selectedTag] || "OVERALL";
+      const apiOrderBy = sortToOrderBy[sortKey] || "PNL";
 
-        newTraders = combined.map((t: any, idx: number) => ({
+      // Fetch with offset - works for both "all" (OVERALL) and specific categories
+      const data = await window.ipc?.invoke("polymarket:getLeaderboard", {
+        category: apiCategory,
+        timePeriod: "ALL",
+        orderBy: apiOrderBy,
+        limit: 50,
+        offset: offset + 50,
+      });
+
+      if (Array.isArray(data) && data.length > 0) {
+        const newTraders: Trader[] = data.map((t: any, idx: number) => ({
           wallet_address: t.proxyWallet || "",
-          username: t.userName || (t.proxyWallet ? `${t.proxyWallet.slice(0, 8)}...` : "Unknown"),
+          username:
+            t.userName ||
+            (t.proxyWallet ? `${t.proxyWallet.slice(0, 8)}...` : "Unknown"),
           avatar_url: t.profileImage || "",
           total_pnl: parseFloat(t.pnl || "0"),
           total_volume: parseFloat(t.vol || "0"),
@@ -2895,7 +2919,7 @@ function TradersView() {
           roi: t.vol > 0 ? (t.pnl || 0) / t.vol : 0,
           smart_score: 50 + Math.random() * 50,
           sharpe_ratio: Math.random() * 2,
-          best_tag: (t.apiCategory || "overall").toLowerCase() as any,
+          best_tag: selectedTag === "all" ? "overall" : selectedTag,
           current_streak: Math.floor(Math.random() * 10) - 3,
           position_count: Math.floor(Math.random() * 100),
           is_active: Math.random() > 0.3,
@@ -2903,48 +2927,20 @@ function TradersView() {
           verified_badge: t.verifiedBadge || false,
           x_username: t.xUsername || "",
         }));
-      } else {
-        // Single category fetch
-        const apiCategory = categoryMap[selectedTag] || "OVERALL";
-        const data = await window.ipc?.invoke("polymarket:getLeaderboard", {
-          category: apiCategory,
-          timePeriod: "ALL",
-          orderBy: "PNL",
-          limit: 50,
-          offset: offset + 50,
-        });
 
-        if (Array.isArray(data) && data.length > 0) {
-          newTraders = data.map((t: any, idx: number) => ({
-            wallet_address: t.proxyWallet || "",
-            username: t.userName || (t.proxyWallet ? `${t.proxyWallet.slice(0, 8)}...` : "Unknown"),
-            avatar_url: t.profileImage || "",
-            total_pnl: parseFloat(t.pnl || "0"),
-            total_volume: parseFloat(t.vol || "0"),
-            rank_volume: offset + 50 + idx + 1,
-            win_rate: 0.5 + Math.random() * 0.4,
-            roi: t.vol > 0 ? (t.pnl || 0) / t.vol : 0,
-            smart_score: 50 + Math.random() * 50,
-            sharpe_ratio: Math.random() * 2,
-            best_tag: selectedTag,
-            current_streak: Math.floor(Math.random() * 10) - 3,
-            position_count: Math.floor(Math.random() * 100),
-            is_active: Math.random() > 0.3,
-            avg_hold_hours: Math.floor(Math.random() * 200),
-            verified_badge: t.verifiedBadge || false,
-            x_username: t.xUsername || "",
-          }));
-        }
-      }
-
-      if (newTraders.length > 0) {
         // Dedupe by address
-        const existingAddresses = new Set(traders.map(t => t.wallet_address.toLowerCase()));
-        const uniqueNew = newTraders.filter(t => t.wallet_address && !existingAddresses.has(t.wallet_address.toLowerCase()));
+        const existingAddresses = new Set(
+          traders.map((t) => t.wallet_address.toLowerCase()),
+        );
+        const uniqueNew = newTraders.filter(
+          (t) =>
+            t.wallet_address &&
+            !existingAddresses.has(t.wallet_address.toLowerCase()),
+        );
 
-        setTraders(prev => [...prev, ...uniqueNew]);
-        setOffset(prev => prev + 50);
-        setHasMore(newTraders.length >= (selectedTag === "all" ? 40 : 50)); // Check if we got enough results
+        setTraders((prev) => [...prev, ...uniqueNew]);
+        setOffset((prev) => prev + 50);
+        setHasMore(data.length >= 50);
       } else {
         setHasMore(false);
       }
@@ -2953,7 +2949,7 @@ function TradersView() {
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore, selectedTag, offset, traders]);
+  }, [loadingMore, hasMore, selectedTag, sortKey, offset, traders]);
 
   // Restore scroll position after traders list updates (when loading more)
   useLayoutEffect(() => {
@@ -3000,42 +2996,39 @@ function TradersView() {
           tech: "TECH",
         };
 
+        // Map sort key to API orderBy parameter
+        const sortToOrderBy: Record<string, string> = {
+          total_pnl: "PNL",
+          total_volume: "VOL",
+          smart_score: "PNL", // API doesn't support score, default to PNL
+          win_rate: "PNL",
+          roi: "PNL",
+          current_streak: "PNL",
+        };
+
         const apiCategory = categoryMap[selectedTag] || "OVERALL";
+        const apiOrderBy = sortToOrderBy[sortKey] || "PNL";
         let data: any[] = [];
 
         if (selectedTag === "all") {
-          // For "all", fetch from multiple categories and combine
-          const categories = ["POLITICS", "CRYPTO", "SPORTS", "CULTURE"];
-          const promises = categories.map((cat) =>
-            window.ipc.invoke("polymarket:getLeaderboard", {
-              category: cat,
-              timePeriod: "ALL",
-              orderBy: "PNL",
-              limit: 25,
-            }),
-          );
-          const results = await Promise.all(promises);
-
-          // Combine and dedupe by address
-          const seen = new Set<string>();
-          results.forEach((catData, idx) => {
-            const catName = categories[idx].toLowerCase();
-            //@ts-ignore
-            (catData || []).forEach((t: any) => {
-              const addr = (t.proxyWallet || "").toLowerCase();
-              if (addr && !seen.has(addr)) {
-                seen.add(addr);
-                data.push({ ...t, apiCategory: catName });
-              }
-            });
+          // For "all", fetch from OVERALL category which includes all traders
+          data = await window.ipc.invoke("polymarket:getLeaderboard", {
+            category: "OVERALL",
+            timePeriod: "ALL",
+            orderBy: apiOrderBy,
+            limit: 50,
           });
-          setHasMore(false); // Can't paginate combined view
+          data = (data || []).map((t: any) => ({
+            ...t,
+            apiCategory: "overall",
+          }));
+          setHasMore(data.length === 50); // Enable pagination for "all" too
         } else {
           // Fetch single category with pagination support
           data = await window.ipc.invoke("polymarket:getLeaderboard", {
             category: apiCategory,
             timePeriod: "ALL",
-            orderBy: "PNL",
+            orderBy: apiOrderBy,
             limit: 50,
           });
           data = (data || []).map((t: any) => ({
@@ -3087,14 +3080,15 @@ function TradersView() {
     };
 
     fetchTraders();
-  }, [selectedTag]); // Re-fetch when category changes
+  }, [selectedTag, sortKey]); // Re-fetch when category or sort changes (API supports PNL/VOL sorting)
 
   // Sort and filter traders - use search results if available
   const sortedTraders = useMemo(() => {
     // Use search results if we have them and search is active
-    let filtered = searchResults !== null && debouncedSearch.length >= 2
-      ? searchResults
-      : traders;
+    let filtered =
+      searchResults !== null && debouncedSearch.length >= 2
+        ? searchResults
+        : traders;
 
     // Filter by targets only if enabled
     if (showTargetsOnly) {
@@ -3119,7 +3113,16 @@ function TradersView() {
       const bVal = b[sortKey] ?? 0;
       return sortDir === "desc" ? bVal - aVal : aVal - bVal;
     });
-  }, [traders, sortKey, sortDir, searchQuery, debouncedSearch, searchResults, showTargetsOnly, targets]);
+  }, [
+    traders,
+    sortKey,
+    sortDir,
+    searchQuery,
+    debouncedSearch,
+    searchResults,
+    showTargetsOnly,
+    targets,
+  ]);
 
   const handleSort = (key: TraderSortKey) => {
     if (sortKey === key) {
@@ -3252,7 +3255,11 @@ function TradersView() {
           >
             {opt.label}
             {sortKey === opt.key && (
-              <span className={sortDir === "desc" ? "text-rose-400" : "text-emerald-400"}>
+              <span
+                className={
+                  sortDir === "desc" ? "text-rose-400" : "text-emerald-400"
+                }
+              >
                 {sortDir === "desc" ? "↓" : "↑"}
               </span>
             )}
@@ -3302,7 +3309,9 @@ function TradersView() {
           {sortedTraders.length === 0 ? (
             <div className="text-center py-12">
               <p className="text-white/40 text-sm">
-                {debouncedSearch.length >= 2 ? "No traders found matching your search" : "No traders found"}
+                {debouncedSearch.length >= 2
+                  ? "No traders found matching your search"
+                  : "No traders found"}
               </p>
             </div>
           ) : (
@@ -3324,7 +3333,9 @@ function TradersView() {
               {loadingMore && (
                 <div className="flex items-center justify-center py-4">
                   <div className="w-4 h-4 border-2 border-white/20 border-t-emerald-400 rounded-full animate-spin" />
-                  <span className="ml-2 text-white/40 text-xs">Loading more...</span>
+                  <span className="ml-2 text-white/40 text-xs">
+                    Loading more...
+                  </span>
                 </div>
               )}
               {hasMore && !loadingMore && (
@@ -3365,15 +3376,18 @@ function TradersView() {
 // Generate unique gradient based on wallet address
 function generateUniqueGradient(address: string): string {
   // Use the wallet address to generate consistent but unique colors
-  const hash = address.toLowerCase().split('').reduce((acc, char) => {
-    return ((acc << 5) - acc) + char.charCodeAt(0);
-  }, 0);
+  const hash = address
+    .toLowerCase()
+    .split("")
+    .reduce((acc, char) => {
+      return (acc << 5) - acc + char.charCodeAt(0);
+    }, 0);
 
   // Generate base hue from hash - this ensures each wallet gets a unique color scheme
   const baseHue = Math.abs(hash % 360);
   // Secondary hue is analogous (close on color wheel) for smooth blending
   const secondaryHue = (baseHue + 30 + Math.abs((hash >> 8) % 40)) % 360;
-  
+
   // Saturation and lightness for vibrant but not garish colors
   const sat = 65 + Math.abs((hash >> 4) % 20);
   const light1 = 50 + Math.abs((hash >> 6) % 15);
@@ -3394,7 +3408,15 @@ function generateUniqueGradient(address: string): string {
 }
 
 // Unique Avatar component with dynamic gradient
-function UniqueAvatar({ address, name, size = 36 }: { address: string; name: string; size?: number }) {
+function UniqueAvatar({
+  address,
+  name,
+  size = 36,
+}: {
+  address: string;
+  name: string;
+  size?: number;
+}) {
   const gradient = generateUniqueGradient(address);
 
   return (
@@ -3440,6 +3462,13 @@ function TraderCard({
   const [selectedTimeframe, setSelectedTimeframe] = useState<
     "1d" | "1w" | "1m" | "all"
   >("all");
+  // Hover state for chart tooltip
+  const [chartHover, setChartHover] = useState<{
+    x: number;
+    pnl: number;
+    timestamp: number;
+  } | null>(null);
+  const chartRef = React.useRef<SVGSVGElement>(null);
 
   const isInTargets = targets.includes(trader.wallet_address.toLowerCase());
   const [profileImage, setProfileImage] = useState<string | null>(null);
@@ -3634,7 +3663,7 @@ function TraderCard({
       : trader.win_rate >= 0.5
         ? "text-amber-400"
         : "text-rose-400";
-  
+
   // Score color: red (<40), yellow (40-70), green (>70)
   const scoreColor =
     trader.smart_score >= 70
@@ -3689,10 +3718,13 @@ function TraderCard({
 
     if (hasMinimalData) {
       // Get current PnL value if we have 1 point, otherwise use trader's total_pnl or 0
-      const currentPnl = filteredHistory.length === 1 ? filteredHistory[0].pnl : (trader.total_pnl || 0);
+      const currentPnl =
+        filteredHistory.length === 1
+          ? filteredHistory[0].pnl
+          : trader.total_pnl || 0;
       const isPositive = currentPnl >= 0;
       const lineColor = isPositive ? "#10b981" : "#f43f5e";
-      
+
       return (
         <div className="bg-white/[0.02] rounded p-3">
           {/* Header with value */}
@@ -3701,8 +3733,11 @@ function TraderCard({
               <span className="text-xs text-white/40">
                 {isEstimatedData ? "Est. P&L Trend" : "P&L History"}
               </span>
-              <span className={`text-sm font-mono font-semibold ${isPositive ? "text-emerald-400" : "text-rose-400"}`}>
-                {currentPnl >= 0 ? "+" : ""}{formatCurrency(currentPnl)}
+              <span
+                className={`text-sm font-mono font-semibold ${isPositive ? "text-emerald-400" : "text-rose-400"}`}
+              >
+                {currentPnl >= 0 ? "+" : ""}
+                {formatCurrency(currentPnl)}
               </span>
               {isEstimatedData && (
                 <span className="text-[10px] text-amber-400/60 bg-amber-400/10 px-1.5 py-0.5 rounded">
@@ -3768,15 +3803,10 @@ function TraderCard({
                 strokeWidth="0.5"
                 vectorEffect="non-scaling-stroke"
               />
-              {/* Single dot if we have 1 data point */}
+              {/* Single dot if we have 1 data point
               {filteredHistory.length === 1 && (
-                <circle
-                  cx="50"
-                  cy="32"
-                  r="2"
-                  fill={lineColor}
-                />
-              )}
+                <circle cx="50" cy="32" r="2" fill={lineColor} />
+              )} */}
             </svg>
           </div>
         </div>
@@ -3796,7 +3826,9 @@ function TraderCard({
     const maxT = filteredHistory[filteredHistory.length - 1].timestamp;
     const timeRange = maxT - minT || 1;
 
-    const lastPnl = filteredHistory[filteredHistory.length - 1].pnl;
+    // Use trader.total_pnl as the current value to match the displayed PnL in the card
+    const lastHistoryPnl = filteredHistory[filteredHistory.length - 1].pnl;
+    const lastPnl = trader.total_pnl; // Use actual current PnL, not graph's last point
     const firstPnl = filteredHistory[0].pnl;
     const isUp = lastPnl >= firstPnl;
     const lineColor = isUp ? "#10b981" : "#f43f5e";
@@ -3806,6 +3838,7 @@ function TraderCard({
       const oldest = new Date(minT);
       const newest = new Date(maxT);
       const days = Math.ceil((maxT - minT) / (24 * 60 * 60 * 1000));
+
       if (days <= 1) return "Today";
       if (days <= 7) return `${days} days`;
       if (days <= 30) return `${Math.ceil(days / 7)} weeks`;
@@ -3827,7 +3860,7 @@ function TraderCard({
               {formatCurrency(lastPnl)}
             </span>
             <span className="text-[10px] text-white/30">
-              ({getTimeRangeLabel()})
+              {/* ({getTimeRangeLabel()}) */}
             </span>
             {isEstimatedData && (
               <span className="text-[10px] text-amber-400/60 bg-amber-400/10 px-1.5 py-0.5 rounded">
@@ -3862,65 +3895,165 @@ function TraderCard({
             })}
           </div>
         </div>
-        {/* Full width responsive chart */}
-        <svg
-          viewBox={`0 0 100 ${height}`}
-          preserveAspectRatio="none"
-          className="w-full h-20"
-        >
-          <defs>
-            <linearGradient
-              id={`traderGrad-${trader.wallet_address}-${selectedTimeframe}`}
-              x1="0%"
-              y1="0%"
-              x2="0%"
-              y2="100%"
+        {/* Full width responsive chart with hover */}
+        <div className="relative">
+          <svg
+            ref={chartRef}
+            viewBox={`0 0 100 ${height}`}
+            preserveAspectRatio="none"
+            className="w-full h-20 cursor-crosshair"
+            onMouseMove={(e) => {
+              if (!chartRef.current) return;
+              const rect = chartRef.current.getBoundingClientRect();
+              const xPercent = ((e.clientX - rect.left) / rect.width) * 100;
+
+              // Find closest data point
+              const clampedX = Math.max(
+                padding.left,
+                Math.min(100 - padding.right, xPercent),
+              );
+              const timestamp =
+                minT +
+                ((clampedX - padding.left) /
+                  (100 - padding.left - padding.right)) *
+                  timeRange;
+
+              // Binary search for closest point
+              let left = 0;
+              let right = filteredHistory.length - 1;
+              while (left < right - 1) {
+                const mid = Math.floor((left + right) / 2);
+                if (filteredHistory[mid].timestamp < timestamp) {
+                  left = mid;
+                } else {
+                  right = mid;
+                }
+              }
+
+              const closest =
+                Math.abs(filteredHistory[left].timestamp - timestamp) <
+                Math.abs(filteredHistory[right].timestamp - timestamp)
+                  ? filteredHistory[left]
+                  : filteredHistory[right];
+
+              const x =
+                padding.left +
+                ((closest.timestamp - minT) / timeRange) *
+                  (100 - padding.left - padding.right);
+              setChartHover({
+                x,
+                pnl: closest.pnl,
+                timestamp: closest.timestamp,
+              });
+            }}
+            onMouseLeave={() => setChartHover(null)}
+          >
+            <defs>
+              <linearGradient
+                id={`traderGrad-${trader.wallet_address}-${selectedTimeframe}`}
+                x1="0%"
+                y1="0%"
+                x2="0%"
+                y2="100%"
+              >
+                <stop offset="0%" stopColor={lineColor} stopOpacity="0.3" />
+                <stop offset="100%" stopColor={lineColor} stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            {/* Area fill */}
+            <path
+              d={(() => {
+                let path = "";
+                filteredHistory.forEach((p, i) => {
+                  const x =
+                    padding.left +
+                    ((p.timestamp - minT) / timeRange) *
+                      (100 - padding.left - padding.right);
+                  const y =
+                    padding.top + chartH - ((p.pnl - minVal) / range) * chartH;
+                  path += i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`;
+                });
+                path += ` L ${100 - padding.right} ${height - padding.bottom} L ${padding.left} ${height - padding.bottom} Z`;
+                return path;
+              })()}
+              fill={`url(#traderGrad-${trader.wallet_address}-${selectedTimeframe})`}
+            />
+            {/* Line */}
+            <path
+              d={(() => {
+                let path = "";
+                filteredHistory.forEach((p, i) => {
+                  const x =
+                    padding.left +
+                    ((p.timestamp - minT) / timeRange) *
+                      (100 - padding.left - padding.right);
+                  const y =
+                    padding.top + chartH - ((p.pnl - minVal) / range) * chartH;
+                  path += i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`;
+                });
+                return path;
+              })()}
+              fill="none"
+              stroke={lineColor}
+              strokeWidth="0.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+            {/* Hover vertical line */}
+            {chartHover && (
+              <line
+                x1={chartHover.x}
+                y1={padding.top}
+                x2={chartHover.x}
+                y2={height - padding.bottom}
+                stroke="white"
+                strokeWidth="0.3"
+                strokeOpacity="0.5"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+            {/* Hover dot */}
+            {/* {chartHover && (
+              <circle
+                cx={chartHover.x}
+                cy={
+                  padding.top +
+                  chartH -
+                  ((chartHover.pnl - minVal) / range) * chartH
+                }
+                r="1.5"
+                fill={lineColor}
+                vectorEffect="non-scaling-stroke"
+              />
+            )} */}
+          </svg>
+          {/* Hover tooltip */}
+          {chartHover && (
+            <div
+              className="absolute top-0 px-1.5 py-0.5 bg-black/90 border border-white/10 text-[10px] whitespace-nowrap z-10 pointer-events-none"
+              style={{
+                left: `${chartHover.x}%`,
+                transform: "translateX(-50%)",
+              }}
             >
-              <stop offset="0%" stopColor={lineColor} stopOpacity="0.3" />
-              <stop offset="100%" stopColor={lineColor} stopOpacity="0" />
-            </linearGradient>
-          </defs>
-          {/* Area fill */}
-          <path
-            d={(() => {
-              let path = "";
-              filteredHistory.forEach((p, i) => {
-                const x =
-                  padding.left +
-                  ((p.timestamp - minT) / timeRange) *
-                    (100 - padding.left - padding.right);
-                const y =
-                  padding.top + chartH - ((p.pnl - minVal) / range) * chartH;
-                path += i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`;
-              });
-              path += ` L ${100 - padding.right} ${height - padding.bottom} L ${padding.left} ${height - padding.bottom} Z`;
-              return path;
-            })()}
-            fill={`url(#traderGrad-${trader.wallet_address}-${selectedTimeframe})`}
-          />
-          {/* Line */}
-          <path
-            d={(() => {
-              let path = "";
-              filteredHistory.forEach((p, i) => {
-                const x =
-                  padding.left +
-                  ((p.timestamp - minT) / timeRange) *
-                    (100 - padding.left - padding.right);
-                const y =
-                  padding.top + chartH - ((p.pnl - minVal) / range) * chartH;
-                path += i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`;
-              });
-              return path;
-            })()}
-            fill="none"
-            stroke={lineColor}
-            strokeWidth="0.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            vectorEffect="non-scaling-stroke"
-          />
-        </svg>
+              <span
+                className={
+                  chartHover.pnl >= 0 ? "text-emerald-400" : "text-rose-400"
+                }
+              >
+                {chartHover.pnl >= 0 ? "+" : ""}
+                {formatCurrency(chartHover.pnl)}
+              </span>
+              <span className="text-white/40 ml-1.5">
+                {new Date(chartHover.timestamp).toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                })}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -3958,7 +4091,9 @@ function TraderCard({
             ) : (
               <UniqueAvatar
                 address={trader.wallet_address}
-                name={profileData?.name || profileData?.pseudonym || trader.username}
+                name={
+                  profileData?.name || profileData?.pseudonym || trader.username
+                }
                 size={36}
               />
             )}
@@ -4250,6 +4385,640 @@ function TraderCard({
         </div>
       )}
     </div>
+  );
+}
+
+// ========== Whales View - Whale Trades Scanner ==========
+type WhaleTrade = {
+  id: string;
+  timestamp: number;
+  marketSlug: string;
+  marketTitle: string;
+  marketImage: string;
+  side: "BUY" | "SELL";
+  outcome: "YES" | "NO";
+  size: number;
+  price: number;
+  walletAddress: string;
+  userName?: string;
+  userImage?: string;
+};
+
+function WhalesView() {
+  const [trades, setTrades] = useState<WhaleTrade[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [minSize, setMinSize] = useState(1000);
+  const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
+  const [walletProfile, setWalletProfile] = useState<any>(null);
+  const [loadingProfile, setLoadingProfile] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+
+  // Time ago formatter
+  const timeAgo = (timestamp: number) => {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+    if (seconds < 0) return "just now";
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  };
+
+  // Fetch whale trades
+  const fetchWhaleTrades = async (showLoading = false) => {
+    if (showLoading) setLoading(true);
+    setError(null);
+    try {
+      const rawTrades = await window.ipc?.invoke("polymarket:getWhaleTrades", {
+        minSize,
+        limit: 500, // Fetch more to find large trades
+      });
+
+      if (!Array.isArray(rawTrades) || rawTrades.length === 0) {
+        setTrades([]);
+        setLoading(false);
+        return;
+      }
+
+      // Map raw trades to our format using correct API field names
+      // API returns: proxyWallet, side, size, price, timestamp, title, slug, icon, outcome, name, pseudonym
+      const mapped: WhaleTrade[] = rawTrades.map((t: any, idx: number) => ({
+        id: t.transactionHash || `trade-${idx}-${t.timestamp}`,
+        timestamp: t.timestamp ? t.timestamp * 1000 : Date.now(), // API returns seconds, convert to ms
+        marketSlug: t.slug || t.eventSlug || "",
+        marketTitle: t.title || "Unknown Market",
+        marketImage: t.icon || "",
+        side: (t.side?.toUpperCase?.() || "BUY") as "BUY" | "SELL",
+        outcome: (t.outcome || "YES") as "YES" | "NO",
+        size:
+          t.usdcSize || parseFloat(t.size || "0") * parseFloat(t.price || "0"),
+        price: parseFloat(t.price || "0"),
+        walletAddress: t.proxyWallet || "",
+        userName: t.name || t.pseudonym || "",
+        userImage: t.profileImage || "",
+      }));
+
+      // Already sorted by size from backend, but also sort by size descending here
+      mapped.sort((a, b) => b.size - a.size);
+
+      setTrades(mapped);
+      setLastUpdated(Date.now());
+    } catch (e: any) {
+      console.error("Failed to fetch whale trades:", e);
+      setError(e.message || "Failed to fetch whale trades");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // Manual refresh handler
+  const handleRefresh = () => {
+    setRefreshing(true);
+    fetchWhaleTrades(false);
+  };
+
+  // Initial fetch and polling
+  useEffect(() => {
+    fetchWhaleTrades(true); // Show loading on initial fetch
+    // Poll every 30 seconds without showing loading
+    const interval = setInterval(() => fetchWhaleTrades(false), 30000);
+    return () => clearInterval(interval);
+  }, [minSize]);
+
+  // Fetch wallet profile when selected
+  useEffect(() => {
+    if (!selectedWallet) {
+      setWalletProfile(null);
+      return;
+    }
+
+    const fetchProfile = async () => {
+      setLoadingProfile(true);
+      try {
+        const [profile, pnlData] = await Promise.all([
+          window.ipc?.invoke("polymarket:getProfile", selectedWallet),
+          window.ipc?.invoke("polymarket:getUserPnl", {
+            address: selectedWallet,
+            interval: "all",
+            fidelity: "1d",
+          }),
+        ]);
+
+        setWalletProfile({
+          ...(profile && typeof profile === "object" ? profile : {}),
+          pnlHistory: pnlData,
+        });
+      } catch (e) {
+        console.error("Failed to fetch profile:", e);
+        setWalletProfile(null);
+      } finally {
+        setLoadingProfile(false);
+      }
+    };
+
+    fetchProfile();
+  }, [selectedWallet]);
+
+  const formatCurrency = (val: number) => {
+    if (Math.abs(val) >= 1000000) return `$${(val / 1000000).toFixed(2)}M`;
+    if (Math.abs(val) >= 1000) return `$${(val / 1000).toFixed(1)}K`;
+    return `$${val.toFixed(2)}`;
+  };
+
+  const sizeFilters = [
+    { label: "$1K+", value: 1000 },
+    { label: "$5K+", value: 5000 },
+    { label: "$10K+", value: 10000 },
+    { label: "$50K+", value: 50000 },
+    { label: "$100K+", value: 100000 },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-white">Whale Trades</h2>
+            <p className="text-xs text-white/40">
+              Track large orders in real-time
+              {lastUpdated && !loading && (
+                <span className="ml-2 text-white/30">
+                  • Updated {timeAgo(lastUpdated)}
+                </span>
+              )}
+            </p>
+          </div>
+          {/* Refresh button */}
+          <button
+            onClick={handleRefresh}
+            disabled={loading || refreshing}
+            className="p-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white/50 hover:text-white/70 transition-colors disabled:opacity-50"
+          >
+            <svg
+              className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
+            </svg>
+          </button>
+        </div>
+
+        {/* Size filter */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-white/40 mr-2">Min Size:</span>
+          {sizeFilters.map((filter) => (
+            <button
+              key={filter.value}
+              onClick={() => setMinSize(filter.value)}
+              className={`px-2.5 py-1 text-[11px] font-medium transition-all ${
+                minSize === filter.value
+                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                  : "bg-white/5 text-white/50 border border-white/10 hover:bg-white/10"
+              }`}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Loading state */}
+      {loading && (
+        <div className="flex items-center justify-center py-16">
+          <div className="flex items-center gap-3">
+            <div className="w-5 h-5 border-2 border-white/20 border-t-emerald-400 rounded-full animate-spin" />
+            <span className="text-white/40 text-sm">
+              Scanning for whale trades...
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Error state */}
+      {error && !loading && (
+        <div className="flex flex-col items-center justify-center py-16">
+          <div className="w-12 h-12 bg-rose-500/10 flex items-center justify-center mb-3">
+            <svg
+              className="w-6 h-6 text-rose-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </div>
+          <p className="text-white/60 text-sm mb-2">
+            Failed to load whale trades
+          </p>
+          <p className="text-white/30 text-xs">{error}</p>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!loading && !error && trades.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-16">
+          <div className="w-12 h-12 bg-white/5 flex items-center justify-center mb-3">
+            <svg
+              className="w-6 h-6 text-white/30"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+          </div>
+          <p className="text-white/40 text-sm">No whale trades found</p>
+          <p className="text-white/30 text-xs mt-1">
+            Try lowering the minimum size filter
+          </p>
+        </div>
+      )}
+
+      {/* Trades list */}
+      {!loading && !error && trades.length > 0 && (
+        <div className="panel p-0">
+          {/* Table header */}
+          <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-white/5 text-[10px] text-white/40 uppercase tracking-wide">
+            <div className="col-span-1">Time</div>
+            <div className="col-span-4">Market</div>
+            <div className="col-span-1 text-center">Side</div>
+            <div className="col-span-2 text-right">Size</div>
+            <div className="col-span-1 text-right">Entry</div>
+            <div className="col-span-3 text-right">Wallet</div>
+          </div>
+
+          {/* Trades */}
+          <div className="max-h-[calc(100vh-280px)] overflow-y-auto divide-y divide-white/[0.04]">
+            {trades.map((trade) => (
+              <div
+                key={trade.id}
+                className="grid grid-cols-12 gap-2 px-4 py-3 hover:bg-white/[0.02] transition-colors items-center"
+              >
+                {/* Time */}
+                <div className="col-span-1">
+                  <span className="text-xs text-white/50 font-mono">
+                    {timeAgo(trade.timestamp)}
+                  </span>
+                </div>
+
+                {/* Market */}
+                <div className="col-span-4 flex items-center gap-2 min-w-0">
+                  {trade.marketImage ? (
+                    <img
+                      src={trade.marketImage}
+                      alt=""
+                      className="w-8 h-8 object-cover flex-shrink-0"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = "none";
+                      }}
+                    />
+                  ) : (
+                    <div className="w-8 h-8 bg-white/5 flex items-center justify-center flex-shrink-0">
+                      <svg
+                        className="w-4 h-4 text-white/20"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={1.5}
+                          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                        />
+                      </svg>
+                    </div>
+                  )}
+                  <p className="text-sm text-white/80 truncate">
+                    {trade.marketTitle}
+                  </p>
+                </div>
+
+                {/* Side */}
+                <div className="col-span-1 flex justify-center">
+                  <span
+                    className={`px-2 py-0.5 text-[10px] font-medium ${
+                      trade.outcome === "YES"
+                        ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                        : "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                    }`}
+                  >
+                    {trade.outcome}
+                  </span>
+                </div>
+
+                {/* Size */}
+                <div className="col-span-2 text-right">
+                  <span
+                    className={`text-sm font-mono font-semibold ${
+                      trade.side === "BUY"
+                        ? "text-emerald-400"
+                        : "text-rose-400"
+                    }`}
+                  >
+                    {formatCurrency(trade.size)}
+                  </span>
+                </div>
+
+                {/* Entry price */}
+                <div className="col-span-1 text-right">
+                  <span className="text-sm font-mono text-white/60">
+                    {(trade.price * 100).toFixed(0)}¢
+                  </span>
+                </div>
+
+                {/* Wallet */}
+                <div className="col-span-3 text-right">
+                  <button
+                    onClick={() => setSelectedWallet(trade.walletAddress)}
+                    className="text-xs font-mono text-white/50 hover:text-emerald-400 transition-colors truncate max-w-full"
+                    title={trade.walletAddress}
+                  >
+                    {trade.userName ||
+                      `${trade.walletAddress.slice(0, 6)}...${trade.walletAddress.slice(-4)}`}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Wallet Profile Modal */}
+      {selectedWallet && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setSelectedWallet(null)}
+        >
+          <div
+            className="bg-[#111113] border border-white/10 w-full max-w-lg max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+              <h3 className="text-lg font-semibold text-white">
+                Trader Profile
+              </h3>
+              <button
+                onClick={() => setSelectedWallet(null)}
+                className="text-white/40 hover:text-white/60 transition-colors"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal content */}
+            <div className="p-5">
+              {loadingProfile ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="w-5 h-5 border-2 border-white/20 border-t-emerald-400 rounded-full animate-spin" />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* User info */}
+                  <div className="flex items-center gap-4">
+                    {walletProfile?.profileImage ? (
+                      <img
+                        src={walletProfile.profileImage}
+                        alt=""
+                        className="w-16 h-16 object-cover"
+                      />
+                    ) : (
+                      <UniqueAvatar
+                        address={selectedWallet}
+                        name={walletProfile?.name || "Trader"}
+                        size={64}
+                      />
+                    )}
+                    <div>
+                      <h4 className="text-lg font-semibold text-white">
+                        {walletProfile?.name ||
+                          walletProfile?.pseudonym ||
+                          "Anonymous Trader"}
+                      </h4>
+                      <p className="text-xs text-white/40 font-mono">
+                        {selectedWallet.slice(0, 10)}...
+                        {selectedWallet.slice(-8)}
+                      </p>
+                      {walletProfile?.xUsername && (
+                        <a
+                          href={`https://x.com/${walletProfile.xUsername}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-emerald-400 hover:underline"
+                        >
+                          @{walletProfile.xUsername}
+                        </a>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Bio */}
+                  {walletProfile?.bio && (
+                    <div className="bg-white/[0.02] border border-white/5 p-3">
+                      <p className="text-sm text-white/60">
+                        {walletProfile.bio}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Stats */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-white/[0.02] border border-white/5 p-3">
+                      <p className="text-[10px] text-white/40 mb-1">
+                        Total PnL
+                      </p>
+                      <p
+                        className={`text-lg font-mono font-semibold ${
+                          (walletProfile?.pnl || 0) >= 0
+                            ? "text-emerald-400"
+                            : "text-rose-400"
+                        }`}
+                      >
+                        {formatCurrency(walletProfile?.pnl || 0)}
+                      </p>
+                    </div>
+                    <div className="bg-white/[0.02] border border-white/5 p-3">
+                      <p className="text-[10px] text-white/40 mb-1">Volume</p>
+                      <p className="text-lg font-mono text-white/80">
+                        {formatCurrency(walletProfile?.volume || 0)}
+                      </p>
+                    </div>
+                    <div className="bg-white/[0.02] border border-white/5 p-3">
+                      <p className="text-[10px] text-white/40 mb-1">
+                        Positions
+                      </p>
+                      <p className="text-lg font-mono text-white/80">
+                        {walletProfile?.positions || 0}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* P&L History Chart */}
+                  {walletProfile?.pnlHistory &&
+                    Array.isArray(walletProfile.pnlHistory) &&
+                    walletProfile.pnlHistory.length > 1 && (
+                      <div className="bg-white/[0.02] border border-white/5 p-3">
+                        <p className="text-[10px] text-white/40 mb-2">
+                          P&L History
+                        </p>
+                        <div className="h-24">
+                          <WalletPnlChart data={walletProfile.pnlHistory} />
+                        </div>
+                      </div>
+                    )}
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 pt-2">
+                    <a
+                      href={`https://polymarket.com/profile/${selectedWallet}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 px-4 py-2 text-sm font-medium text-center bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 transition-colors"
+                    >
+                      View on Polymarket
+                    </a>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(selectedWallet);
+                      }}
+                      className="px-4 py-2 text-sm font-medium bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 transition-colors"
+                    >
+                      Copy Address
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Simple P&L chart for wallet modal
+function WalletPnlChart({ data }: { data: any[] }) {
+  const height = 80;
+  const padding = { top: 4, right: 4, bottom: 4, left: 4 };
+  const chartH = height - padding.top - padding.bottom;
+
+  // Parse data
+  const points = data
+    .map((point: any) => {
+      const timestamp =
+        point.t || point.timestamp || point.time
+          ? new Date(point.t || point.timestamp || point.time).getTime()
+          : null;
+      const pnl =
+        point.p !== undefined
+          ? parseFloat(point.p)
+          : point.pnl !== undefined
+            ? parseFloat(point.pnl)
+            : null;
+
+      if (timestamp && pnl !== null && !isNaN(pnl)) {
+        return { timestamp, pnl };
+      }
+      return null;
+    })
+    .filter(Boolean) as { timestamp: number; pnl: number }[];
+
+  if (points.length < 2) {
+    return (
+      <div className="h-full flex items-center justify-center text-white/30 text-xs">
+        Not enough data
+      </div>
+    );
+  }
+
+  points.sort((a, b) => a.timestamp - b.timestamp);
+
+  const values = points.map((p) => p.pnl);
+  const minVal = Math.min(...values);
+  const maxVal = Math.max(...values);
+  const range = maxVal - minVal || 1;
+
+  const minT = points[0].timestamp;
+  const maxT = points[points.length - 1].timestamp;
+  const timeRange = maxT - minT || 1;
+
+  const lastPnl = points[points.length - 1].pnl;
+  const firstPnl = points[0].pnl;
+  const isUp = lastPnl >= firstPnl;
+  const lineColor = isUp ? "#10b981" : "#f43f5e";
+
+  // Build path
+  let path = "";
+  points.forEach((p, i) => {
+    const x =
+      padding.left +
+      ((p.timestamp - minT) / timeRange) * (100 - padding.left - padding.right);
+    const y = padding.top + chartH - ((p.pnl - minVal) / range) * chartH;
+    path += i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`;
+  });
+
+  // Area path
+  const areaPath = `${path} L ${100 - padding.right} ${height - padding.bottom} L ${padding.left} ${height - padding.bottom} Z`;
+
+  return (
+    <svg
+      viewBox={`0 0 100 ${height}`}
+      preserveAspectRatio="none"
+      className="w-full h-full"
+    >
+      <defs>
+        <linearGradient id="walletPnlGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor={lineColor} stopOpacity="0.3" />
+          <stop offset="100%" stopColor={lineColor} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={areaPath} fill="url(#walletPnlGrad)" />
+      <path
+        d={path}
+        fill="none"
+        stroke={lineColor}
+        strokeWidth="0.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
   );
 }
 

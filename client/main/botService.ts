@@ -215,7 +215,10 @@ export class BotService {
         // Trim trades array on load to prevent memory bloat
         if (state.trades && state.trades.length > this.MAX_TRADES) {
           state.trades = state.trades.slice(-this.MAX_TRADES);
-          this.log("info", `Trimmed trades on load: kept ${this.MAX_TRADES} most recent`);
+          this.log(
+            "info",
+            `Trimmed trades on load: kept ${this.MAX_TRADES} most recent`,
+          );
         }
 
         // Clean up old closed positions (shares === 0)
@@ -230,7 +233,10 @@ export class BotService {
             }
           }
           if (removedCount > 0) {
-            this.log("info", `Cleaned up ${removedCount} closed positions on load`);
+            this.log(
+              "info",
+              `Cleaned up ${removedCount} closed positions on load`,
+            );
           }
 
           // If still too many positions, keep only the most recent
@@ -242,8 +248,13 @@ export class BotService {
               const bTime = (b[1] as any).openedAt || 0;
               return bTime - aTime;
             });
-            state.positions = Object.fromEntries(sorted.slice(0, this.MAX_POSITIONS));
-            this.log("info", `Trimmed positions on load: kept ${this.MAX_POSITIONS} most recent`);
+            state.positions = Object.fromEntries(
+              sorted.slice(0, this.MAX_POSITIONS),
+            );
+            this.log(
+              "info",
+              `Trimmed positions on load: kept ${this.MAX_POSITIONS} most recent`,
+            );
           }
         }
 
@@ -484,10 +495,10 @@ export class BotService {
     // Clean up CLOB client
     if (this.clobClient) {
       try {
-        if (typeof this.clobClient.disconnect === 'function') {
+        if (typeof this.clobClient.disconnect === "function") {
           await this.clobClient.disconnect();
         }
-        if (typeof this.clobClient.close === 'function') {
+        if (typeof this.clobClient.close === "function") {
           this.clobClient.close();
         }
       } catch (e) {
@@ -533,7 +544,7 @@ export class BotService {
 
     try {
       // Remove all event listeners first to prevent memory leaks
-      if (typeof this.wsClient.removeAllListeners === 'function') {
+      if (typeof this.wsClient.removeAllListeners === "function") {
         this.wsClient.removeAllListeners();
       }
 
@@ -543,8 +554,10 @@ export class BotService {
       }
 
       // Only try to unsubscribe/disconnect if the socket is actually open
-      const readyState = this.wsClient._ws?.readyState ?? this.wsClient.readyState;
-      if (readyState === 1) { // OPEN
+      const readyState =
+        this.wsClient._ws?.readyState ?? this.wsClient.readyState;
+      if (readyState === 1) {
+        // OPEN
         // Unsubscribe from all topics
         try {
           this.wsClient.unsubscribe?.({ subscriptions: [] });
@@ -553,7 +566,7 @@ export class BotService {
         }
 
         // Force disconnect
-        if (typeof this.wsClient.disconnect === 'function') {
+        if (typeof this.wsClient.disconnect === "function") {
           this.wsClient.disconnect();
         }
       }
@@ -711,13 +724,16 @@ export class BotService {
 
   // Reconnection state for exponential backoff
   private reconnectAttempts: number = 0;
-  private readonly RECONNECT_BASE_MS = 1000;  // Start with 1 second
-  private readonly RECONNECT_MAX_MS = 30000;  // Max 30 seconds
+  private readonly RECONNECT_BASE_MS = 1000; // Start with 1 second
+  private readonly RECONNECT_MAX_MS = 30000; // Max 30 seconds
 
   private scheduleReconnect() {
     // Don't schedule if already reconnecting or not running
     if (this.isReconnecting || !this.running) {
-      this.log("debug", `Skipping scheduleReconnect - isReconnecting: ${this.isReconnecting}, running: ${this.running}`);
+      this.log(
+        "debug",
+        `Skipping scheduleReconnect - isReconnecting: ${this.isReconnecting}, running: ${this.running}`,
+      );
       return;
     }
 
@@ -804,8 +820,13 @@ export class BotService {
       // Clean up seenTrades set
       if (this.seenTrades.size > this.MAX_SEEN_TRADES) {
         const arr = Array.from(this.seenTrades);
-        this.seenTrades = new Set(arr.slice(-Math.floor(this.MAX_SEEN_TRADES / 2)));
-        this.log("debug", `Cleaned seenTrades: ${arr.length} -> ${this.seenTrades.size}`);
+        this.seenTrades = new Set(
+          arr.slice(-Math.floor(this.MAX_SEEN_TRADES / 2)),
+        );
+        this.log(
+          "debug",
+          `Cleaned seenTrades: ${arr.length} -> ${this.seenTrades.size}`,
+        );
       }
 
       // Clean up stats.errors
@@ -814,7 +835,11 @@ export class BotService {
       }
 
       // Clean up state trades if loaded
-      if (this.state && this.state.trades && this.state.trades.length > this.MAX_TRADES) {
+      if (
+        this.state &&
+        this.state.trades &&
+        this.state.trades.length > this.MAX_TRADES
+      ) {
         this.state.trades = this.state.trades.slice(-this.MAX_TRADES);
         this.log("debug", `Trimmed state.trades to ${this.MAX_TRADES}`);
       }
@@ -831,7 +856,10 @@ export class BotService {
       }
 
       // Clear live stats cache if stale
-      if (this.liveStatsCache && Date.now() - this.liveStatsCache.timestamp > 60000) {
+      if (
+        this.liveStatsCache &&
+        Date.now() - this.liveStatsCache.timestamp > 60000
+      ) {
         this.liveStatsCache = null;
       }
 
@@ -870,7 +898,9 @@ export class BotService {
           tradesExecuted: this.stats.tradesExecuted,
           errors: this.stats.errors.length,
           seenTradesSize: this.seenTrades.size,
-          positionsCount: this.state ? Object.keys(this.state.positions || {}).length : 0,
+          positionsCount: this.state
+            ? Object.keys(this.state.positions || {}).length
+            : 0,
           tradesCount: this.state?.trades?.length || 0,
         },
         connected: this.connected,
@@ -887,7 +917,7 @@ export class BotService {
         const stats = fs.statSync(debugLogPath);
         if (stats.size > 100 * 1024) {
           const content = fs.readFileSync(debugLogPath, "utf-8");
-          const lines = content.split("\n").filter(l => l.trim());
+          const lines = content.split("\n").filter((l) => l.trim());
           const recentLines = lines.slice(-50); // Keep last 50 entries
           fs.writeFileSync(debugLogPath, recentLines.join("\n") + "\n");
         }
@@ -895,7 +925,10 @@ export class BotService {
         // Ignore
       }
 
-      this.log("debug", `Memory: ${heapUsedMB}MB heap, ${rssMB}MB RSS | Uptime: ${uptimeHours}h | Msgs: ${this.messageCount}`);
+      this.log(
+        "debug",
+        `Memory: ${heapUsedMB}MB heap, ${rssMB}MB RSS | Uptime: ${uptimeHours}h | Msgs: ${this.messageCount}`,
+      );
     } catch (e) {
       // Ignore debug logging errors
     }
@@ -979,91 +1012,93 @@ export class BotService {
         return;
       }
 
-    if (message.type !== "trades" && message.type !== "orders_matched") {
-      return;
-    }
+      if (message.type !== "trades" && message.type !== "orders_matched") {
+        return;
+      }
 
-    const trade = message.payload;
-    if (!trade) return;
+      const trade = message.payload;
+      if (!trade) return;
 
-    // Check if this is from a target wallet
-    const traderWallet = trade.proxyWallet?.toLowerCase();
-    if (!traderWallet || !this.targets.has(traderWallet)) {
-      return; // Not a target wallet, ignore
-    }
+      // Check if this is from a target wallet
+      const traderWallet = trade.proxyWallet?.toLowerCase();
+      if (!traderWallet || !this.targets.has(traderWallet)) {
+        return; // Not a target wallet, ignore
+      }
 
-    // Build trade ID for deduplication
-    const tradeId = `${trade.transactionHash}-${trade.asset}-${trade.side}-${trade.size}`;
+      // Build trade ID for deduplication
+      const tradeId = `${trade.transactionHash}-${trade.asset}-${trade.side}-${trade.size}`;
 
-    // Skip if already seen
-    if (this.seenTrades.has(tradeId)) {
-      return;
-    }
-    this.seenTrades.add(tradeId);
+      // Skip if already seen
+      if (this.seenTrades.has(tradeId)) {
+        return;
+      }
+      this.seenTrades.add(tradeId);
 
-    // Clean up old trades more aggressively (keep last MAX_SEEN_TRADES/2)
-    if (this.seenTrades.size > this.MAX_SEEN_TRADES) {
-      const arr = Array.from(this.seenTrades);
-      this.seenTrades = new Set(arr.slice(-Math.floor(this.MAX_SEEN_TRADES / 2)));
-    }
+      // Clean up old trades more aggressively (keep last MAX_SEEN_TRADES/2)
+      if (this.seenTrades.size > this.MAX_SEEN_TRADES) {
+        const arr = Array.from(this.seenTrades);
+        this.seenTrades = new Set(
+          arr.slice(-Math.floor(this.MAX_SEEN_TRADES / 2)),
+        );
+      }
 
-    this.targetTradeCount++;
-    this.stats.targetTradesDetected = this.targetTradeCount;
+      this.targetTradeCount++;
+      this.stats.targetTradesDetected = this.targetTradeCount;
 
-    // Build trade signal
-    // Note: Polymarket timestamps can be in seconds or milliseconds, normalize to ms
-    let tradeTimestamp = trade.timestamp || Date.now();
-    if (tradeTimestamp < 1e12) {
-      // Timestamp is in seconds, convert to milliseconds
-      tradeTimestamp = tradeTimestamp * 1000;
-    }
+      // Build trade signal
+      // Note: Polymarket timestamps can be in seconds or milliseconds, normalize to ms
+      let tradeTimestamp = trade.timestamp || Date.now();
+      if (tradeTimestamp < 1e12) {
+        // Timestamp is in seconds, convert to milliseconds
+        tradeTimestamp = tradeTimestamp * 1000;
+      }
 
-    const signal: TradeSignal = {
-      tokenId: trade.asset,
-      conditionId: trade.conditionId,
-      marketSlug: trade.slug || trade.eventSlug,
-      outcome: trade.outcome as "YES" | "NO",
-      outcomeIndex: trade.outcomeIndex,
-      side: trade.side as "BUY" | "SELL",
-      price: trade.price,
-      size: trade.size,
-      targetWallet: traderWallet,
-      tradeId,
-      timestamp: tradeTimestamp,
-      eventSlug: trade.eventSlug,
-      name: trade.name,
-      title: trade.title,
-      transactionHash: trade.transactionHash,
-    };
+      const signal: TradeSignal = {
+        tokenId: trade.asset,
+        conditionId: trade.conditionId,
+        marketSlug: trade.slug || trade.eventSlug,
+        outcome: trade.outcome as "YES" | "NO",
+        outcomeIndex: trade.outcomeIndex,
+        side: trade.side as "BUY" | "SELL",
+        price: trade.price,
+        size: trade.size,
+        targetWallet: traderWallet,
+        tradeId,
+        timestamp: tradeTimestamp,
+        eventSlug: trade.eventSlug,
+        name: trade.name,
+        title: trade.title,
+        transactionHash: trade.transactionHash,
+      };
 
-    this.log(
-      "info",
-      `Target trade detected: ${signal.side} ${signal.size.toFixed(2)} ${signal.outcome} @ $${signal.price.toFixed(3)}`,
-      {
-        market: signal.marketSlug,
-        wallet: signal.targetWallet.substring(0, 10) + "...",
-      },
-    );
-
-    this.emit({ type: "trade-detected", data: signal });
-
-    // Execute trade based on mode
-    if (this.tradingMode === "live") {
-      this.executeLiveTrade(signal);
-    } else if (this.tradingMode === "dry-run") {
-      // Dry run - just log, don't execute
       this.log(
         "info",
-        `[DRY-RUN] Would execute: ${signal.side} ${signal.size.toFixed(2)} ${signal.outcome}`,
+        `Target trade detected: ${signal.side} ${signal.size.toFixed(2)} ${signal.outcome} @ $${signal.price.toFixed(3)}`,
+        {
+          market: signal.marketSlug,
+          wallet: signal.targetWallet.substring(0, 10) + "...",
+        },
       );
-      this.emit({
-        type: "trade-skipped",
-        data: { signal, reason: "Dry run mode" },
-      });
-    } else {
-      // Paper trading
-      this.executePaperTrade(signal);
-    }
+
+      this.emit({ type: "trade-detected", data: signal });
+
+      // Execute trade based on mode
+      if (this.tradingMode === "live") {
+        this.executeLiveTrade(signal);
+      } else if (this.tradingMode === "dry-run") {
+        // Dry run - just log, don't execute
+        this.log(
+          "info",
+          `[DRY-RUN] Would execute: ${signal.side} ${signal.size.toFixed(2)} ${signal.outcome}`,
+        );
+        this.emit({
+          type: "trade-skipped",
+          data: { signal, reason: "Dry run mode" },
+        });
+      } else {
+        // Paper trading
+        this.executePaperTrade(signal);
+      }
     } catch (err: any) {
       this.log("error", `Error handling message: ${err.message}`);
     }
@@ -1073,203 +1108,205 @@ export class BotService {
     try {
       if (!this.state || !this.config) return;
 
-    // Calculate position size based on config
-    let shares = signal.size;
-    const config = this.config.trading;
+      // Calculate position size based on config
+      let shares = signal.size;
+      const config = this.config.trading;
 
-    switch (config.sizingMode) {
-      case "fixed-usd":
-        shares = config.fixedUsdSize / signal.price;
-        break;
-      case "fixed-shares":
-        shares = config.fixedSharesSize;
-        break;
-      case "proportional":
-        shares = signal.size * config.proportionalMultiplier;
-        break;
-    }
+      switch (config.sizingMode) {
+        case "fixed-usd":
+          shares = config.fixedUsdSize / signal.price;
+          break;
+        case "fixed-shares":
+          shares = config.fixedSharesSize;
+          break;
+        case "proportional":
+          shares = signal.size * config.proportionalMultiplier;
+          break;
+      }
 
-    // Apply min size
-    if (shares < config.minOrderSize) {
-      this.log(
-        "info",
-        `Trade skipped: size ${shares.toFixed(2)} below minimum ${config.minOrderSize}`,
-      );
-      this.emit({
-        type: "trade-skipped",
-        data: { signal, reason: "Below minimum size" },
-      });
-      return;
-    }
-
-    // Apply max trade limit
-    const usdValue = shares * signal.price;
-    if (usdValue > this.config.risk.maxUsdPerTrade) {
-      shares = this.config.risk.maxUsdPerTrade / signal.price;
-    }
-
-    const cost = shares * signal.price;
-    const fees = cost * 0.001; // 0.1% fee
-
-    // Check balance for BUY orders
-    if (signal.side === "BUY") {
-      if (cost + fees > this.state.currentBalance) {
+      // Apply min size
+      if (shares < config.minOrderSize) {
         this.log(
-          "warn",
-          `Insufficient balance: need $${(cost + fees).toFixed(2)}, have $${this.state.currentBalance.toFixed(2)}`,
+          "info",
+          `Trade skipped: size ${shares.toFixed(2)} below minimum ${config.minOrderSize}`,
         );
         this.emit({
           type: "trade-skipped",
-          data: { signal, reason: "Insufficient balance" },
+          data: { signal, reason: "Below minimum size" },
         });
         return;
       }
-    }
 
-    // Execute the trade
-    const tokenId = signal.tokenId;
-    const existingPosition = this.state.positions[tokenId];
+      // Apply max trade limit
+      const usdValue = shares * signal.price;
+      if (usdValue > this.config.risk.maxUsdPerTrade) {
+        shares = this.config.risk.maxUsdPerTrade / signal.price;
+      }
 
-    if (signal.side === "BUY") {
-      // BUY: Add to position
-      if (existingPosition && existingPosition.shares > 0) {
-        // Average in
-        const totalShares = existingPosition.shares + shares;
-        const totalCost = existingPosition.totalCost + cost;
-        existingPosition.shares = totalShares;
-        existingPosition.totalCost = totalCost;
-        existingPosition.avgEntryPrice = totalCost / totalShares;
-        existingPosition.feesPaid = (existingPosition.feesPaid || 0) + fees;
+      const cost = shares * signal.price;
+      const fees = cost * 0.001; // 0.1% fee
+
+      // Check balance for BUY orders
+      if (signal.side === "BUY") {
+        if (cost + fees > this.state.currentBalance) {
+          this.log(
+            "warn",
+            `Insufficient balance: need $${(cost + fees).toFixed(2)}, have $${this.state.currentBalance.toFixed(2)}`,
+          );
+          this.emit({
+            type: "trade-skipped",
+            data: { signal, reason: "Insufficient balance" },
+          });
+          return;
+        }
+      }
+
+      // Execute the trade
+      const tokenId = signal.tokenId;
+      const existingPosition = this.state.positions[tokenId];
+
+      if (signal.side === "BUY") {
+        // BUY: Add to position
+        if (existingPosition && existingPosition.shares > 0) {
+          // Average in
+          const totalShares = existingPosition.shares + shares;
+          const totalCost = existingPosition.totalCost + cost;
+          existingPosition.shares = totalShares;
+          existingPosition.totalCost = totalCost;
+          existingPosition.avgEntryPrice = totalCost / totalShares;
+          existingPosition.feesPaid = (existingPosition.feesPaid || 0) + fees;
+        } else {
+          // New position
+          this.state.positions[tokenId] = {
+            tokenId,
+            marketSlug: signal.marketSlug,
+            outcome: signal.outcome,
+            side: "BUY",
+            shares,
+            avgEntryPrice: signal.price,
+            totalCost: cost,
+            currentPrice: signal.price,
+            openedAt: Date.now(),
+            feesPaid: fees,
+            conditionId: signal.conditionId,
+          };
+        }
+
+        // Deduct from balance
+        this.state.currentBalance -= cost + fees;
       } else {
-        // New position
-        this.state.positions[tokenId] = {
-          tokenId,
-          marketSlug: signal.marketSlug,
-          outcome: signal.outcome,
-          side: "BUY",
-          shares,
-          avgEntryPrice: signal.price,
-          totalCost: cost,
-          currentPrice: signal.price,
-          openedAt: Date.now(),
-          feesPaid: fees,
-          conditionId: signal.conditionId,
-        };
+        // SELL: Reduce position
+        if (!existingPosition || existingPosition.shares <= 0) {
+          this.log("info", "No position to sell");
+          this.emit({
+            type: "trade-skipped",
+            data: { signal, reason: "No position to sell" },
+          });
+          return;
+        }
+
+        const sellShares = Math.min(shares, existingPosition.shares);
+        const proceeds = sellShares * signal.price;
+        const entryValue =
+          (sellShares / existingPosition.shares) * existingPosition.totalCost;
+        const pnl = proceeds - entryValue - fees;
+
+        existingPosition.shares -= sellShares;
+        existingPosition.totalCost -= entryValue;
+        existingPosition.feesPaid = (existingPosition.feesPaid || 0) + fees;
+
+        // Add to balance
+        this.state.currentBalance += proceeds - fees;
+
+        // Clean up fully closed positions to prevent memory leak
+        if (existingPosition.shares <= 0) {
+          delete this.state.positions[tokenId];
+        }
+
+        // Update stats
+        if (!this.state.stats) this.state.stats = {};
+        this.state.stats.totalRealizedPnl =
+          (this.state.stats.totalRealizedPnl || 0) + pnl;
+
+        if (pnl > 0) {
+          this.state.stats.winningTrades =
+            (this.state.stats.winningTrades || 0) + 1;
+          this.state.stats.largestWin = Math.max(
+            this.state.stats.largestWin || 0,
+            pnl,
+          );
+        } else if (pnl < 0) {
+          this.state.stats.losingTrades =
+            (this.state.stats.losingTrades || 0) + 1;
+          this.state.stats.largestLoss = Math.min(
+            this.state.stats.largestLoss || 0,
+            pnl,
+          );
+        }
       }
 
-      // Deduct from balance
-      this.state.currentBalance -= cost + fees;
-    } else {
-      // SELL: Reduce position
-      if (!existingPosition || existingPosition.shares <= 0) {
-        this.log("info", "No position to sell");
-        this.emit({
-          type: "trade-skipped",
-          data: { signal, reason: "No position to sell" },
-        });
-        return;
-      }
+      // Record trade
+      const trade = {
+        id: `trade-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        timestamp: Date.now(),
+        tokenId,
+        marketSlug: signal.marketSlug,
+        outcome: signal.outcome,
+        side: signal.side,
+        price: signal.price,
+        shares,
+        usdValue: cost,
+        fees,
+        targetWallet: signal.targetWallet,
+        tradeId: signal.tradeId,
+      };
 
-      const sellShares = Math.min(shares, existingPosition.shares);
-      const proceeds = sellShares * signal.price;
-      const entryValue =
-        (sellShares / existingPosition.shares) * existingPosition.totalCost;
-      const pnl = proceeds - entryValue - fees;
-
-      existingPosition.shares -= sellShares;
-      existingPosition.totalCost -= entryValue;
-      existingPosition.feesPaid = (existingPosition.feesPaid || 0) + fees;
-
-      // Add to balance
-      this.state.currentBalance += proceeds - fees;
-
-      // Clean up fully closed positions to prevent memory leak
-      if (existingPosition.shares <= 0) {
-        delete this.state.positions[tokenId];
+      this.state.trades.push(trade);
+      // Trim trades array aggressively to prevent memory leak
+      if (this.state.trades.length > this.MAX_TRADES) {
+        // Keep only half when trimming to reduce frequency of trim operations
+        this.state.trades = this.state.trades.slice(
+          -Math.floor(this.MAX_TRADES * 0.75),
+        );
       }
 
       // Update stats
       if (!this.state.stats) this.state.stats = {};
-      this.state.stats.totalRealizedPnl =
-        (this.state.stats.totalRealizedPnl || 0) + pnl;
+      this.state.stats.totalTrades = (this.state.stats.totalTrades || 0) + 1;
+      this.state.stats.totalFees = (this.state.stats.totalFees || 0) + fees;
 
-      if (pnl > 0) {
-        this.state.stats.winningTrades =
-          (this.state.stats.winningTrades || 0) + 1;
-        this.state.stats.largestWin = Math.max(
-          this.state.stats.largestWin || 0,
-          pnl,
-        );
-      } else if (pnl < 0) {
-        this.state.stats.losingTrades =
-          (this.state.stats.losingTrades || 0) + 1;
-        this.state.stats.largestLoss = Math.min(
-          this.state.stats.largestLoss || 0,
-          pnl,
-        );
-      }
-    }
+      // Save state
+      this.saveState();
 
-    // Record trade
-    const trade = {
-      id: `trade-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      timestamp: Date.now(),
-      tokenId,
-      marketSlug: signal.marketSlug,
-      outcome: signal.outcome,
-      side: signal.side,
-      price: signal.price,
-      shares,
-      usdValue: cost,
-      fees,
-      targetWallet: signal.targetWallet,
-      tradeId: signal.tradeId,
-    };
+      this.stats.tradesExecuted++;
+      this.stats.lastTradeTime = Date.now();
 
-    this.state.trades.push(trade);
-    // Trim trades array aggressively to prevent memory leak
-    if (this.state.trades.length > this.MAX_TRADES) {
-      // Keep only half when trimming to reduce frequency of trim operations
-      this.state.trades = this.state.trades.slice(-Math.floor(this.MAX_TRADES * 0.75));
-    }
+      // Calculate latency from target trade time
+      const latencyMs = signal.timestamp ? Date.now() - signal.timestamp : 0;
 
-    // Update stats
-    if (!this.state.stats) this.state.stats = {};
-    this.state.stats.totalTrades = (this.state.stats.totalTrades || 0) + 1;
-    this.state.stats.totalFees = (this.state.stats.totalFees || 0) + fees;
+      this.log(
+        "info",
+        `Executed paper ${signal.side}: ${shares.toFixed(2)} ${signal.outcome} @ $${signal.price.toFixed(3)}`,
+        {
+          market: signal.marketSlug,
+          cost: cost.toFixed(2),
+          balance: this.state.currentBalance.toFixed(2),
+        },
+      );
 
-    // Save state
-    this.saveState();
-
-    this.stats.tradesExecuted++;
-    this.stats.lastTradeTime = Date.now();
-
-    // Calculate latency from target trade time
-    const latencyMs = signal.timestamp ? Date.now() - signal.timestamp : 0;
-
-    this.log(
-      "info",
-      `Executed paper ${signal.side}: ${shares.toFixed(2)} ${signal.outcome} @ $${signal.price.toFixed(3)}`,
-      {
-        market: signal.marketSlug,
-        cost: cost.toFixed(2),
-        balance: this.state.currentBalance.toFixed(2),
-      },
-    );
-
-    this.emit({
-      type: "trade-executed",
-      data: {
-        signal,
-        result: trade,
-        yourShares: shares,
-        yourPrice: signal.price,
-        yourTotal: cost,
-        fees,
-        latencyMs,
-      },
-    });
-    this.emit({ type: "status", data: this.stats });
+      this.emit({
+        type: "trade-executed",
+        data: {
+          signal,
+          result: trade,
+          yourShares: shares,
+          yourPrice: signal.price,
+          yourTotal: cost,
+          fees,
+          latencyMs,
+        },
+      });
+      this.emit({ type: "status", data: this.stats });
     } catch (err: any) {
       this.log("error", `Error executing paper trade: ${err.message}`);
       this.emit({

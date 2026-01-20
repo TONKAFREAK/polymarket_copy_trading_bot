@@ -73,6 +73,8 @@ export interface TradingConfig {
   proportionalMultiplier: number;
   /** Minimum order size in USD */
   minOrderSize: number;
+  /** Minimum order size in shares */
+  minOrderShares: number;
   /** Slippage tolerance (0.01 = 1%) */
   slippage: number;
 }

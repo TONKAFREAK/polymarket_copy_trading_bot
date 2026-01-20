@@ -259,9 +259,13 @@ export class Executor {
       });
     }
 
-    // Skip orders that are too small (less than 0.01 shares)
-    if (size < 0.01) {
-      logger.debug("Order size too small, will skip", { size });
+    // Skip orders that are too small (below minimum shares)
+    const minOrderShares = this.tradingConfig.minOrderShares || 0;
+    if (minOrderShares > 0 && size < minOrderShares) {
+      logger.debug("Order size too small, will skip", {
+        size,
+        minOrderShares,
+      });
       size = 0;
       usdValue = 0;
     }

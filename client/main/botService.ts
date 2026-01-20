@@ -10,6 +10,7 @@
 import path from "path";
 import fs from "fs";
 import { BrowserWindow } from "electron";
+import { ClobClientWrapper } from "./clobClient";
 
 // Types for trade signals and events
 interface TradeSignal {
@@ -38,6 +39,7 @@ interface BotConfig {
     fixedSharesSize: number;
     proportionalMultiplier: number;
     minOrderSize: number;
+    minOrderShares: number;
     slippage: number;
   };
   risk: {
@@ -192,7 +194,8 @@ export class BotService {
         fixedUsdSize: 10,
         fixedSharesSize: 10,
         proportionalMultiplier: 0.01,
-        minOrderSize: 0.2,
+        minOrderSize: 1,
+        minOrderShares: 0.01,
         slippage: 0.01,
       },
       risk: {
@@ -370,13 +373,34 @@ export class BotService {
 
     // Determine trading mode from accounts state (takes priority over config)
     const accountsState = this.loadAccountsState();
+    this.log(
+      "info",
+      `Accounts state loaded - activeAccountId: ${accountsState.activeAccountId || "null"}, accounts count: ${accountsState.accounts?.length || 0}`,
+    );
+
     if (accountsState.activeAccountId) {
-      this.tradingMode = "live";
+      // Verify the account actually exists
+      const activeAccount = accountsState.accounts?.find(
+        (acc: any) => acc.id === accountsState.activeAccountId,
+      );
+      if (activeAccount) {
+        this.tradingMode = "live";
+        this.log(
+          "info",
+          `Active account found: ${activeAccount.name} (${activeAccount.address})`,
+        );
+      } else {
+        this.log(
+          "error",
+          `activeAccountId ${accountsState.activeAccountId} not found in accounts list!`,
+        );
+        this.tradingMode = this.config.mode || "paper";
+      }
     } else {
       this.tradingMode = this.config.mode || "paper";
     }
 
-    // Apply dry-run override if set
+    // Apply dry-run override if set (but NOT for live mode)
     if (this.config.risk?.dryRun && this.tradingMode !== "live") {
       this.tradingMode = "dry-run";
     }
@@ -398,19 +422,28 @@ export class BotService {
     if (this.tradingMode === "live") {
       try {
         await this.initializeClobClient();
+        this.log(
+          "info",
+          "CLOB client initialized successfully for LIVE trading",
+        );
       } catch (e: any) {
-        this.log("error", `Failed to initialize CLOB client: ${e.message}`);
+        this.log(
+          "error",
+          `CRITICAL: Failed to initialize CLOB client: ${e.message}`,
+        );
+        this.log("error", "CRITICAL: Bot will NOT execute live trades!");
         this.emit({
           type: "error",
           data: {
-            message: `CLOB init failed: ${e.message}`,
+            message: `CRITICAL: CLOB init failed - ${e.message}. Cannot start in live mode!`,
             context: "startup",
           },
         });
-        // Fall back to paper mode
-        this.tradingMode = "paper";
-        this.stats.mode = "paper";
-        this.log("warn", "Falling back to paper trading mode");
+        // THROW error to prevent starting the bot in wrong mode
+        // User MUST fix their credentials or switch to paper trading manually
+        throw new Error(
+          `Cannot start live trading: ${e.message}. Please check your API credentials in Settings, or switch to Paper Trading.`,
+        );
       }
     }
 
@@ -538,45 +571,120 @@ export class BotService {
   // Flag to prevent concurrent reconnection attempts
   private isReconnecting: boolean = false;
 
+  // Track destroyed state to prevent callbacks from stale WebSocket clients
+  private wsClientDestroyed: boolean = false;
+
   // Properly clean up WebSocket client and all its event handlers
   private async cleanupWebSocket(): Promise<void> {
     if (!this.wsClient) return;
 
+    this.log("info", "Cleaning up WebSocket connection...");
+
+    // Mark as destroyed FIRST to prevent any callbacks
+    this.wsClientDestroyed = true;
+
+    // Keep reference to clear it
+    const clientToCleanup = this.wsClient;
+    this.wsClient = null;
+
     try {
-      // Remove all event listeners first to prevent memory leaks
-      if (typeof this.wsClient.removeAllListeners === "function") {
-        this.wsClient.removeAllListeners();
+      // Disable auto-reconnect FIRST (set on both options and client)
+      try {
+        if (clientToCleanup.options) {
+          clientToCleanup.options.autoReconnect = false;
+        }
+        // Some versions store it directly on client
+        clientToCleanup.autoReconnect = false;
+        clientToCleanup._autoReconnect = false;
+      } catch (e) {
+        // Ignore
       }
 
-      // Disable auto-reconnect FIRST
-      if (this.wsClient.options) {
-        this.wsClient.options.autoReconnect = false;
+      // Clear any internal timers the library might have
+      try {
+        if (clientToCleanup._reconnectTimer) {
+          clearTimeout(clientToCleanup._reconnectTimer);
+          clientToCleanup._reconnectTimer = null;
+        }
+        if (clientToCleanup._pingTimer) {
+          clearInterval(clientToCleanup._pingTimer);
+          clientToCleanup._pingTimer = null;
+        }
+        if (clientToCleanup.reconnectTimer) {
+          clearTimeout(clientToCleanup.reconnectTimer);
+          clientToCleanup.reconnectTimer = null;
+        }
+        if (clientToCleanup.pingInterval) {
+          clearInterval(clientToCleanup.pingInterval);
+          clientToCleanup.pingInterval = null;
+        }
+      } catch (e) {
+        // Ignore
       }
 
-      // Only try to unsubscribe/disconnect if the socket is actually open
-      const readyState =
-        this.wsClient._ws?.readyState ?? this.wsClient.readyState;
-      if (readyState === 1) {
-        // OPEN
-        // Unsubscribe from all topics
+      // Remove all event listeners to prevent memory leaks and callbacks
+      try {
+        if (typeof clientToCleanup.removeAllListeners === "function") {
+          clientToCleanup.removeAllListeners();
+        }
+      } catch (e) {
+        // Ignore
+      }
+
+      // Try to unsubscribe from all topics (ignore errors)
+      try {
+        clientToCleanup.unsubscribe?.({ subscriptions: [] });
+      } catch (e) {
+        // Ignore
+      }
+
+      // Force disconnect using the client's disconnect method
+      try {
+        if (typeof clientToCleanup.disconnect === "function") {
+          clientToCleanup.disconnect();
+        }
+      } catch (e) {
+        // Ignore
+      }
+
+      // Also close the underlying raw WebSocket if it exists
+      const ws =
+        clientToCleanup._ws || clientToCleanup.ws || clientToCleanup.socket;
+      if (ws) {
         try {
-          this.wsClient.unsubscribe?.({ subscriptions: [] });
+          // Remove listeners from raw ws to prevent reconnect triggers
+          ws.onopen = null;
+          ws.onclose = null;
+          ws.onerror = null;
+          ws.onmessage = null;
+
+          // Also remove event emitter style listeners
+          if (typeof ws.removeAllListeners === "function") {
+            ws.removeAllListeners();
+          }
+
+          // Force close with normal closure code
+          if (ws.readyState === 0 || ws.readyState === 1) {
+            // CONNECTING or OPEN
+            ws.close(1000, "Bot stopped");
+          }
+
+          // Terminate if close isn't enough
+          if (typeof ws.terminate === "function") {
+            ws.terminate();
+          }
         } catch (e) {
           // Ignore
         }
-
-        // Force disconnect
-        if (typeof this.wsClient.disconnect === "function") {
-          this.wsClient.disconnect();
-        }
       }
-      // For non-OPEN states, just null out the client - don't try to close
-      // This prevents "WebSocket was closed before the connection was established" errors
+
+      this.log("info", "WebSocket disconnected successfully");
     } catch (e) {
-      // Ignore close errors
+      this.log("warn", `Error during WebSocket cleanup: ${e}`);
     } finally {
-      this.wsClient = null;
       this.isReconnecting = false;
+      this.connected = false;
+      this.stats.connected = false;
     }
   }
 
@@ -594,10 +702,15 @@ export class BotService {
     }
 
     this.isReconnecting = true;
+    // Reset destroyed flag for new connection
+    this.wsClientDestroyed = false;
 
     try {
       // Clean up existing WebSocket client before creating a new one
       await this.cleanupWebSocket();
+
+      // Reset destroyed flag again after cleanup (cleanup sets it to true)
+      this.wsClientDestroyed = false;
 
       // Dynamically import the real-time data client
       const { RealTimeDataClient, ConnectionStatus } =
@@ -607,8 +720,24 @@ export class BotService {
         targets: this.targets.size,
       });
 
-      this.wsClient = new RealTimeDataClient({
+      // Capture reference to check if this client instance is still valid
+      const clientId = Date.now();
+
+      const newClient = new RealTimeDataClient({
         onConnect: (client: any) => {
+          // Ignore if this client was destroyed or bot is not running
+          if (
+            this.wsClientDestroyed ||
+            !this.running ||
+            this.wsClient !== newClient
+          ) {
+            this.log(
+              "debug",
+              "Ignoring onConnect - client destroyed or bot not running",
+            );
+            return;
+          }
+
           try {
             this.log("info", "WebSocket connected to Polymarket");
             this.connected = true;
@@ -640,6 +769,15 @@ export class BotService {
           }
         },
         onMessage: (_: any, message: any) => {
+          // Ignore messages if client destroyed or bot is not running
+          if (
+            this.wsClientDestroyed ||
+            !this.running ||
+            this.wsClient !== newClient
+          ) {
+            return;
+          }
+
           try {
             this.messageCount++;
             this.stats.messagesReceived = this.messageCount;
@@ -667,6 +805,22 @@ export class BotService {
           }
         },
         onStatusChange: (status: any) => {
+          // Ignore status changes if client destroyed or bot is not running
+          if (
+            this.wsClientDestroyed ||
+            !this.running ||
+            this.wsClient !== newClient
+          ) {
+            this.log(
+              "debug",
+              "Ignoring onStatusChange - client destroyed or bot not running",
+              {
+                status,
+              },
+            );
+            return;
+          }
+
           try {
             this.log("debug", "WebSocket status change", { status });
 
@@ -700,7 +854,10 @@ export class BotService {
         pingInterval: 15000,
       });
 
-      this.wsClient.connect();
+      // Store the new client
+      this.wsClient = newClient;
+
+      newClient.connect();
     } catch (error: any) {
       this.log("error", "Failed to connect WebSocket", {
         error: error.message,
@@ -1083,7 +1240,13 @@ export class BotService {
       this.emit({ type: "trade-detected", data: signal });
 
       // Execute trade based on mode
+      this.log(
+        "info",
+        `Dispatching trade in ${this.tradingMode.toUpperCase()} mode`,
+      );
+
       if (this.tradingMode === "live") {
+        this.log("info", "[LIVE] Calling executeLiveTrade...");
         this.executeLiveTrade(signal);
       } else if (this.tradingMode === "dry-run") {
         // Dry run - just log, don't execute
@@ -1097,6 +1260,7 @@ export class BotService {
         });
       } else {
         // Paper trading
+        this.log("info", "[PAPER] Calling executePaperTrade...");
         this.executePaperTrade(signal);
       }
     } catch (err: any) {
@@ -1124,23 +1288,41 @@ export class BotService {
           break;
       }
 
-      // Apply min size
-      if (shares < config.minOrderSize) {
+      // Apply minimum USD size if configured
+      let usdValue = shares * signal.price;
+      const minOrderSizeUsd = config.minOrderSize ?? 0;
+      if (
+        minOrderSizeUsd > 0 &&
+        usdValue < minOrderSizeUsd &&
+        signal.price > 0
+      ) {
+        shares = Math.ceil((minOrderSizeUsd / signal.price) * 100) / 100;
+        usdValue = shares * signal.price;
+        this.log("debug", "Adjusted paper trade to meet minimum USD size", {
+          minOrderSizeUsd,
+          adjustedShares: shares,
+          adjustedUsdValue: usdValue.toFixed(2),
+        });
+      }
+
+      // Apply minimum shares size if configured
+      const minOrderShares = config.minOrderShares ?? 0;
+      if (minOrderShares > 0 && shares < minOrderShares) {
         this.log(
           "info",
-          `Trade skipped: size ${shares.toFixed(2)} below minimum ${config.minOrderSize}`,
+          `Trade skipped: size ${shares.toFixed(2)} below minimum ${minOrderShares}`,
         );
         this.emit({
           type: "trade-skipped",
-          data: { signal, reason: "Below minimum size" },
+          data: { signal, reason: "Below minimum shares" },
         });
         return;
       }
 
       // Apply max trade limit
-      const usdValue = shares * signal.price;
       if (usdValue > this.config.risk.maxUsdPerTrade) {
         shares = this.config.risk.maxUsdPerTrade / signal.price;
+        usdValue = shares * signal.price;
       }
 
       const cost = shares * signal.price;
@@ -1337,72 +1519,34 @@ export class BotService {
   }
 
   private async initializeClobClient(): Promise<void> {
+    this.log("info", "Initializing CLOB client for live trading...");
+
     try {
-      // Try to load the CLOB client from our src directory
-      // In production, it's relative to the app; in development, go up from client folder
-      const possiblePaths = [
-        path.join(process.cwd(), "..", "src", "polymarket", "clobClient"),
-        path.join(process.cwd(), "src", "polymarket", "clobClient"),
-        path.join(
-          __dirname,
-          "..",
-          "..",
-          "..",
-          "src",
-          "polymarket",
-          "clobClient",
-        ),
-      ];
-
-      let ClobClientWrapper: any = null;
-      let loadedPath = "";
-
-      for (const modulePath of possiblePaths) {
-        try {
-          const module = await import(modulePath);
-          ClobClientWrapper = module.ClobClientWrapper;
-          loadedPath = modulePath;
-          break;
-        } catch {
-          // Try next path
-        }
-      }
-
-      if (!ClobClientWrapper) {
-        throw new Error(
-          `Cannot find clobClient module. Tried paths: ${possiblePaths.join(", ")}`,
-        );
-      }
-
-      this.log("info", `Loaded CLOB client from: ${loadedPath}`);
-
-      // Load credentials from active account in accounts.json (primary source for live trading)
+      // Load credentials from active account in accounts.json
       const accountsState = this.loadAccountsState();
       let privateKey: string | null = null;
+      let polyApiKey: string | null = null;
+      let polyApiSecret: string | null = null;
+      let polyPassphrase: string | null = null;
+      let polyFunderAddress: string | null = null;
+      let signatureType: number = 1; // Default to 1 (Magic/Email login) since most users use that
 
       if (accountsState.activeAccountId && accountsState.accounts) {
         const activeAccount = accountsState.accounts.find(
           (acc: any) => acc.id === accountsState.activeAccountId,
         );
-        if (activeAccount && activeAccount.privateKey) {
+        if (activeAccount) {
           privateKey = activeAccount.privateKey;
+          polyApiKey = activeAccount.polyApiKey;
+          polyApiSecret = activeAccount.polyApiSecret;
+          polyPassphrase = activeAccount.polyPassphrase;
+          polyFunderAddress = activeAccount.polyFunderAddress;
+          // Use signatureType from account, default to 1 (Magic/Email login)
+          signatureType = activeAccount.signatureType ?? 1;
           this.log(
             "info",
-            `Using credentials from active account: ${activeAccount.name} (${activeAccount.address})`,
+            `Using credentials from active account: ${activeAccount.name} (${activeAccount.address}), signatureType: ${signatureType}`,
           );
-        }
-      }
-
-      // Fallback to .env file if no active account found
-      if (!privateKey) {
-        const envPath = path.join(this.dataDir, ".env");
-        if (fs.existsSync(envPath)) {
-          const envContent = fs.readFileSync(envPath, "utf-8");
-          // Try PRIVATE_KEY first (used by account switching), then POLY_PRIVATE_KEY
-          let match = envContent.match(/PRIVATE_KEY=(.+)/);
-          if (match) {
-            privateKey = match[1].trim();
-          }
         }
       }
 
@@ -1412,14 +1556,26 @@ export class BotService {
         );
       }
 
+      if (!polyApiKey || !polyApiSecret || !polyPassphrase) {
+        throw new Error(
+          "Missing Polymarket API credentials. Please ensure your account has API Key, Secret, and Passphrase configured.",
+        );
+      }
+
       // Ensure private key has 0x prefix
       if (!privateKey.startsWith("0x")) {
         privateKey = "0x" + privateKey;
       }
 
+      // Create the CLOB client using the local bundled module
       this.clobClient = new ClobClientWrapper({
         privateKey,
         chainId: 137, // Polygon mainnet
+        polyApiKey,
+        polyApiSecret,
+        polyPassphrase,
+        polyFunderAddress: polyFunderAddress || undefined,
+        signatureType, // 0 = browser wallet, 1 = Magic/Email login
       });
 
       await this.clobClient.initialize();
@@ -1439,6 +1595,7 @@ export class BotService {
       const accountsPath = path.join(this.dataDir, "accounts.json");
       let privateKey: string | null = null;
       let walletAddress: string | null = null;
+      let funderAddress: string | null = null;
 
       if (fs.existsSync(accountsPath)) {
         try {
@@ -1452,9 +1609,12 @@ export class BotService {
             if (activeAccount) {
               privateKey = activeAccount.privateKey;
               walletAddress = activeAccount.address;
+              // IMPORTANT: Use polyFunderAddress for querying positions/balances
+              // This is the Polymarket proxy address where funds are held
+              funderAddress = activeAccount.polyFunderAddress;
               this.log(
                 "info",
-                `Found active account: ${activeAccount.name} (${walletAddress})`,
+                `Found active account: ${activeAccount.name} (wallet: ${walletAddress}, funder: ${funderAddress || "same as wallet"})`,
               );
             }
           }
@@ -1473,6 +1633,11 @@ export class BotService {
           if (match) {
             privateKey = match[1].trim();
           }
+          // Also try to get funder address from .env
+          match = envContent.match(/POLY_FUNDER_ADDRESS=(.+)/);
+          if (match) {
+            funderAddress = match[1].trim();
+          }
         }
       }
 
@@ -1482,12 +1647,13 @@ export class BotService {
         );
       }
 
-      // Initialize with wallet address (preferred) since we already have it from the account
-      // This avoids needing to derive the address from the private key
-      this.liveDataClient = new LiveDataClient(walletAddress || privateKey!);
+      // Use funder address (Polymarket proxy) for API queries if available
+      // Otherwise fall back to wallet address
+      const queryAddress = funderAddress || walletAddress || privateKey!;
+      this.liveDataClient = new LiveDataClient(queryAddress);
       this.log(
         "info",
-        `Live data client initialized for wallet: ${this.liveDataClient.getWalletAddress()}`,
+        `Live data client initialized for address: ${this.liveDataClient.getWalletAddress()} (funderAddress: ${funderAddress ? "yes" : "no"})`,
       );
     } catch (e: any) {
       this.log("error", `Failed to initialize live data client: ${e.message}`);
@@ -1496,8 +1662,13 @@ export class BotService {
   }
 
   private async executeLiveTrade(signal: TradeSignal): Promise<void> {
+    this.log("info", `[LIVE TRADE] Attempting to execute live trade...`);
+
     if (!this.clobClient || !this.config) {
-      this.log("error", "CLOB client not initialized");
+      this.log(
+        "error",
+        "[LIVE TRADE] CLOB client not initialized - cannot execute!",
+      );
       this.emit({
         type: "trade-skipped",
         data: { signal, reason: "CLOB client not initialized" },
@@ -1524,23 +1695,41 @@ export class BotService {
           break;
       }
 
-      // Apply min size
-      if (shares < config.minOrderSize) {
+      // Apply minimum USD size if configured
+      let usdValue = shares * signal.price;
+      const minOrderSizeUsd = config.minOrderSize ?? 0;
+      if (
+        minOrderSizeUsd > 0 &&
+        usdValue < minOrderSizeUsd &&
+        signal.price > 0
+      ) {
+        shares = Math.ceil((minOrderSizeUsd / signal.price) * 100) / 100;
+        usdValue = shares * signal.price;
+        this.log("debug", "Adjusted live trade to meet minimum USD size", {
+          minOrderSizeUsd,
+          adjustedShares: shares,
+          adjustedUsdValue: usdValue.toFixed(2),
+        });
+      }
+
+      // Apply minimum shares size if configured
+      const minOrderShares = config.minOrderShares ?? 0;
+      if (minOrderShares > 0 && shares < minOrderShares) {
         this.log(
           "info",
-          `Trade skipped: size ${shares.toFixed(2)} below minimum ${config.minOrderSize}`,
+          `Trade skipped: size ${shares.toFixed(2)} below minimum ${minOrderShares}`,
         );
         this.emit({
           type: "trade-skipped",
-          data: { signal, reason: "Below minimum size" },
+          data: { signal, reason: "Below minimum shares" },
         });
         return;
       }
 
       // Apply max trade limit
-      const usdValue = shares * signal.price;
       if (usdValue > this.config.risk.maxUsdPerTrade) {
         shares = this.config.risk.maxUsdPerTrade / signal.price;
+        usdValue = shares * signal.price;
       }
 
       // Apply slippage to price
@@ -1554,6 +1743,13 @@ export class BotService {
       );
 
       // Place the order via CLOB client
+      this.log("debug", "[LIVE TRADE] Calling clobClient.placeOrder...", {
+        tokenId: signal.tokenId,
+        side: signal.side,
+        size: shares,
+        price: limitPrice,
+      });
+
       const orderResult = await this.clobClient.placeOrder({
         tokenId: signal.tokenId,
         side: signal.side,
@@ -1561,20 +1757,25 @@ export class BotService {
         price: limitPrice,
       });
 
+      this.log("debug", "[LIVE TRADE] Order result:", orderResult);
+
       const latencyMs = Date.now() - startTime;
 
       if (orderResult.success) {
         this.stats.tradesExecuted++;
         this.stats.lastTradeTime = Date.now();
 
-        const fees = orderResult.fees || shares * limitPrice * 0.001;
+        // Use correct field names from OrderResult interface
+        const filledShares = orderResult.executedSize || shares;
+        const filledPrice = orderResult.executedPrice || limitPrice;
+        const fees = shares * limitPrice * 0.001; // Estimate fees
 
         this.log(
           "info",
-          `LIVE trade executed: ${signal.side} ${shares.toFixed(2)} @ $${orderResult.avgPrice?.toFixed(4) || limitPrice.toFixed(4)}`,
+          `LIVE trade executed: ${signal.side} ${filledShares.toFixed(2)} @ $${filledPrice.toFixed(4)}`,
           {
             orderId: orderResult.orderId,
-            filledShares: orderResult.filledShares,
+            filledShares,
             latencyMs,
           },
         );
@@ -1584,20 +1785,21 @@ export class BotService {
           data: {
             signal,
             result: orderResult,
-            yourShares: orderResult.filledShares || shares,
-            yourPrice: orderResult.avgPrice || limitPrice,
-            yourTotal:
-              (orderResult.filledShares || shares) *
-              (orderResult.avgPrice || limitPrice),
+            yourShares: filledShares,
+            yourPrice: filledPrice,
+            yourTotal: filledShares * filledPrice,
             fees,
             latencyMs,
           },
         });
       } else {
-        this.log("error", `LIVE trade failed: ${orderResult.error}`);
+        // clobClient returns errorMessage, not error
+        const errorMsg =
+          orderResult.errorMessage || orderResult.error || "Unknown error";
+        this.log("error", `LIVE trade failed: ${errorMsg}`);
         this.emit({
           type: "trade-skipped",
-          data: { signal, reason: orderResult.error || "Order failed" },
+          data: { signal, reason: errorMsg || "Order failed" },
         });
       }
     } catch (e: any) {
@@ -1682,11 +1884,98 @@ export class BotService {
     }
 
     try {
-      // Get all live data from Polymarket
-      const liveData = await this.liveDataClient.getLiveData();
-      const balance = liveData.balance || 0;
-      const positions = liveData.positions || [];
-      const trades = liveData.trades || [];
+      // Try to use CLOB client first if available (authenticated, more reliable)
+      let balance = 0;
+      let positions: any[] = [];
+      let trades: any[] = [];
+
+      // Initialize CLOB client if not already done
+      if (!this.clobClient) {
+        try {
+          await this.initializeClobClient();
+        } catch (e: any) {
+          this.log(
+            "warn",
+            "Could not initialize CLOB client for live stats",
+            e.message,
+          );
+        }
+      }
+
+      if (this.clobClient) {
+        try {
+          // Get USDC balance from CLOB client (authenticated API)
+          const balances = await this.clobClient.getBalances();
+          balance = parseFloat(balances.usdc) || 0;
+          this.log("debug", `CLOB client balance: $${balance}`);
+
+          // Get positions from CLOB client (aggregates trades + verifies on-chain balances)
+          const positionsResult = await this.clobClient.getPositions();
+          if (positionsResult && positionsResult.positions) {
+            positions = positionsResult.positions.map((pos: any) => ({
+              tokenId: pos.tokenId,
+              outcome: pos.outcome || "YES",
+              shares: pos.shares,
+              avgEntryPrice: pos.avgEntryPrice,
+              currentPrice: pos.avgEntryPrice, // Current market price would need separate API call
+              currentValue: pos.currentValue,
+              market: pos.market || "Unknown Market",
+              conditionId: pos.conditionId,
+              isResolved: pos.isResolved,
+              isRedeemable: pos.isRedeemable,
+              feesPaid: pos.feesPaid,
+            }));
+            this.log(
+              "debug",
+              `CLOB client positions: ${positions.length}, totalValue: $${positionsResult.totalValue.toFixed(2)}`,
+            );
+          }
+
+          // Get trades from CLOB client
+          const tradesResult = await this.clobClient.getTrades();
+          if (tradesResult && tradesResult.trades) {
+            trades = tradesResult.trades.map((t: any) => ({
+              id: t.id,
+              timestamp: new Date(t.match_time).getTime(),
+              tokenId: t.asset_id,
+              market: t.market,
+              outcome: t.outcome || "YES",
+              side: t.side?.toUpperCase() || "BUY",
+              price: parseFloat(t.price) || 0,
+              shares: parseFloat(t.size) || 0,
+              usdValue: (parseFloat(t.price) || 0) * (parseFloat(t.size) || 0),
+              fees: t.fee_rate_bps
+                ? (parseFloat(t.price) *
+                    parseFloat(t.size) *
+                    parseFloat(t.fee_rate_bps)) /
+                  10000
+                : 0,
+            }));
+            this.log("debug", `CLOB client trades: ${trades.length}`);
+          }
+        } catch (e: any) {
+          this.log(
+            "warn",
+            `CLOB client data fetch failed: ${e.message}, falling back to LiveDataClient`,
+          );
+        }
+      }
+
+      // Fallback to LiveDataClient if CLOB client didn't get data
+      if (balance === 0 && trades.length === 0 && this.liveDataClient) {
+        try {
+          const liveData = await this.liveDataClient.getLiveData();
+          balance = liveData.balance || 0;
+          positions = liveData.positions || [];
+          trades = liveData.trades || [];
+          this.log(
+            "debug",
+            `LiveDataClient fallback: balance=$${balance}, positions=${positions.length}, trades=${trades.length}`,
+          );
+        } catch (e: any) {
+          this.log("warn", `LiveDataClient fallback failed: ${e.message}`);
+        }
+      }
 
       // Calculate positions value and unrealized PnL
       let positionsValue = 0;

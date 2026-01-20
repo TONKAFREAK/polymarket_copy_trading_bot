@@ -5647,12 +5647,12 @@ function SettingsView({
   // Toggle dry run mode (only for live accounts)
   const toggleDryRun = () => {
     setLocalConfig((prev) =>
-      prev
+      prev && prev.risk
         ? {
             ...prev,
             risk: { ...prev.risk, dryRun: !prev.risk.dryRun },
           }
-        : null,
+        : prev,
     );
   };
 
@@ -5761,8 +5761,8 @@ function SettingsView({
         </div>
       )}
 
-      {/* Dry Run Toggle - Only shown for Live accounts */}
-      {isLiveMode && (
+      {/* Dry Run Toggle - Only shown for Live accounts when paper trading is disabled */}
+      {isLiveMode && !localConfig.paperTrading?.enabled && (
         <div className="panel">
           <div className="panel-header">
             <p className="panel-title">Dry Run Mode</p>
@@ -5773,11 +5773,11 @@ function SettingsView({
                 <div className="flex items-center gap-3">
                   <div
                     className={`w-10 h-10  -full flex items-center justify-center ${
-                      localConfig.risk.dryRun ? "bg-cyan-500/20" : "bg-white/5"
+                      localConfig.risk?.dryRun ? "bg-cyan-500/20" : "bg-white/5"
                     }`}
                   >
                     <svg
-                      className={`w-5 h-5 ${localConfig.risk.dryRun ? "text-cyan-400" : "text-white/40"}`}
+                      className={`w-5 h-5 ${localConfig.risk?.dryRun ? "text-cyan-400" : "text-white/40"}`}
                       fill="none"
                       viewBox="0 0 24 24"
                       stroke="currentColor"
@@ -5797,14 +5797,14 @@ function SettingsView({
                   </div>
                   <div>
                     <p
-                      className={`font-medium ${localConfig.risk.dryRun ? "text-cyan-400" : "text-white/80"}`}
+                      className={`font-medium ${localConfig.risk?.dryRun ? "text-cyan-400" : "text-white/80"}`}
                     >
-                      {localConfig.risk.dryRun
+                      {localConfig.risk?.dryRun
                         ? "Dry Run Enabled"
                         : "Dry Run Disabled"}
                     </p>
                     <p className="text-xs text-white/50">
-                      {localConfig.risk.dryRun
+                      {localConfig.risk?.dryRun
                         ? "Watch mode - detects trades but doesn't execute. Good for observation."
                         : "Live execution - trades will be placed with real money."}
                     </p>
@@ -5814,17 +5814,17 @@ function SettingsView({
               <button
                 onClick={toggleDryRun}
                 className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer  -full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                  localConfig.risk.dryRun ? "bg-cyan-500" : "bg-white/20"
+                  localConfig.risk?.dryRun ? "bg-cyan-500" : "bg-white/20"
                 }`}
               >
                 <span
                   className={`pointer-events-none inline-block h-5 w-5 transform  -full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                    localConfig.risk.dryRun ? "translate-x-5" : "translate-x-0"
+                    localConfig.risk?.dryRun ? "translate-x-5" : "translate-x-0"
                   }`}
                 />
               </button>
             </div>
-            {!localConfig.risk.dryRun && (
+            {!localConfig.risk?.dryRun && (
               <div className="mt-3 p-3 bg-rose-500/10 border border-rose-500/30  ">
                 <div className="flex items-start gap-2">
                   <svg
@@ -5856,7 +5856,7 @@ function SettingsView({
         <div className="panel-header">
           <p className="panel-title">Target Wallets</p>
           <span className="text-sm text-white/40">
-            {localConfig.targets.length} targets
+            {localConfig.targets?.length || 0} targets
           </span>
         </div>
         <div className="p-4 space-y-4">
@@ -5985,6 +5985,14 @@ function SettingsView({
               }
               type="number"
               prefix="$"
+            />
+            <InputField
+              label="Min Shares"
+              value={localConfig.trading.minOrderShares}
+              onChange={(v) =>
+                updateTradingConfig("minOrderShares", parseFloat(v) || 0)
+              }
+              type="number"
             />
             <InputField
               label="Slippage"

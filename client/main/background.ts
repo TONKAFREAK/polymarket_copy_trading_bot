@@ -588,13 +588,14 @@ ipcMain.handle("wallet:getAddress", async () => {
 
 // Get configuration
 ipcMain.handle("config:get", async () => {
-  return readJsonFile("config.json", {
+  const defaults = {
     trading: {
       sizingMode: "proportional",
       fixedUsdSize: 10,
       fixedSharesSize: 10,
       proportionalMultiplier: 0.01,
       minOrderSize: 1,
+      minOrderShares: 0.01,
       slippage: 0.01,
     },
     risk: {
@@ -604,7 +605,7 @@ ipcMain.handle("config:get", async () => {
       doNotTradeMarketsOlderThanSecondsFromResolution: 0,
       marketAllowlist: [],
       marketDenylist: [],
-      dryRun: true,
+      dryRun: false,
     },
     stopLoss: {
       enabled: false,
@@ -628,7 +629,27 @@ ipcMain.handle("config:get", async () => {
     },
     targets: [],
     chainId: 137,
-  });
+  };
+
+  // Read saved config and deep-merge with defaults
+  const saved = readJsonFile("config.json", {});
+  const merged = {
+    ...defaults,
+    ...saved,
+    trading: { ...defaults.trading, ...saved.trading },
+    risk: { ...defaults.risk, ...saved.risk },
+    stopLoss: { ...defaults.stopLoss, ...saved.stopLoss },
+    autoRedeem: { ...defaults.autoRedeem, ...saved.autoRedeem },
+    paperTrading: { ...defaults.paperTrading, ...saved.paperTrading },
+    polling: { ...defaults.polling, ...saved.polling },
+  };
+
+  // Force dryRun to false when paper trading is enabled
+  if (merged.paperTrading?.enabled) {
+    merged.risk.dryRun = false;
+  }
+
+  return merged;
 });
 
 // Update configuration
@@ -726,9 +747,60 @@ ipcMain.handle("stats:get", async () => {
           botConnected: isConnected,
         };
       }
+      // Live mode but no data yet - return empty stats (do NOT fall through to paper)
+      return {
+        mode: "live",
+        balance: 0,
+        startingBalance: 0,
+        openPositions: 0,
+        positionsValue: 0,
+        unrealizedPnl: 0,
+        realizedPnl: 0,
+        totalTrades: 0,
+        totalFees: 0,
+        winRate: 0,
+        winningTrades: 0,
+        losingTrades: 0,
+        largestWin: 0,
+        largestLoss: 0,
+        profitFactor: 0,
+        avgTradeSize: 0,
+        uptime: isRunning ? Date.now() - startTime : 0,
+        lastUpdate: Date.now(),
+        pollingInterval: config.polling?.intervalMs || 2000,
+        targetsCount: config.targets?.length || 0,
+        openOrdersCount: 0,
+        botRunning: isRunning,
+        botConnected: isConnected,
+      };
     } catch (e) {
       console.error("Failed to fetch live stats:", e);
-      // Fall through to paper stats as fallback
+      // In live mode, return empty stats instead of falling through to paper
+      return {
+        mode: "live",
+        balance: 0,
+        startingBalance: 0,
+        openPositions: 0,
+        positionsValue: 0,
+        unrealizedPnl: 0,
+        realizedPnl: 0,
+        totalTrades: 0,
+        totalFees: 0,
+        winRate: 0,
+        winningTrades: 0,
+        losingTrades: 0,
+        largestWin: 0,
+        largestLoss: 0,
+        profitFactor: 0,
+        avgTradeSize: 0,
+        uptime: isRunning ? Date.now() - startTime : 0,
+        lastUpdate: Date.now(),
+        pollingInterval: config.polling?.intervalMs || 2000,
+        targetsCount: config.targets?.length || 0,
+        openOrdersCount: 0,
+        botRunning: isRunning,
+        botConnected: isConnected,
+      };
     }
   }
 
@@ -858,9 +930,12 @@ ipcMain.handle("portfolio:get", async () => {
         const activePositions = positions.filter((p: any) => p.shares > 0);
         return { positions: activePositions };
       }
+      // Live mode but no positions - return empty array (do NOT fall through to paper)
+      return { positions: [] };
     } catch (e) {
       console.error("Failed to fetch live positions:", e);
-      // Fall through to paper positions
+      // In live mode, return empty positions instead of falling through to paper
+      return { positions: [] };
     }
   }
 
@@ -987,9 +1062,12 @@ ipcMain.handle("trades:get", async () => {
         trades.sort((a: any, b: any) => b.timestamp - a.timestamp);
         return { trades };
       }
+      // Live mode but no trades yet - return empty array (do NOT fall through to paper)
+      return { trades: [] };
     } catch (e) {
       console.error("Failed to fetch live trades:", e);
-      // Fall through to paper trades
+      // In live mode, return empty trades instead of falling through to paper
+      return { trades: [] };
     }
   }
 
@@ -1152,9 +1230,50 @@ ipcMain.handle("performance:get", async () => {
           returns,
         };
       }
+      // Live mode but no data yet - return empty performance stats (do NOT fall through to paper)
+      return {
+        totalTrades: 0,
+        winningTrades: 0,
+        losingTrades: 0,
+        winRate: 0,
+        totalPnl: 0,
+        realizedPnl: 0,
+        unrealizedPnl: 0,
+        largestWin: 0,
+        largestLoss: 0,
+        profitFactor: 0,
+        avgWin: 0,
+        avgLoss: 0,
+        avgTradeSize: 0,
+        totalVolume: 0,
+        totalFees: 0,
+        startingBalance: 0,
+        currentBalance: 0,
+        returns: 0,
+      };
     } catch (e) {
       console.error("Failed to fetch live performance:", e);
-      // Fall through to paper performance
+      // In live mode, return empty performance stats instead of falling through to paper
+      return {
+        totalTrades: 0,
+        winningTrades: 0,
+        losingTrades: 0,
+        winRate: 0,
+        totalPnl: 0,
+        realizedPnl: 0,
+        unrealizedPnl: 0,
+        largestWin: 0,
+        largestLoss: 0,
+        profitFactor: 0,
+        avgWin: 0,
+        avgLoss: 0,
+        avgTradeSize: 0,
+        totalVolume: 0,
+        totalFees: 0,
+        startingBalance: 0,
+        currentBalance: 0,
+        returns: 0,
+      };
     }
   }
 
@@ -1418,105 +1537,238 @@ ipcMain.handle("chart:recordSnapshot", async () => {
   return snapshot;
 });
 
-// Sell a position (paper trading)
-ipcMain.handle("position:sell", async (_event, tokenId: string) => {
-  const paperState = readJsonFile("paper-state.json", {
-    positions: {},
-    trades: [],
-    currentBalance: 10000,
-    stats: {},
-  });
+// Sell a position (supports both paper and live trading)
+ipcMain.handle(
+  "position:sell",
+  async (
+    _event,
+    tokenId: string,
+    requestedShares?: number,
+    requestedPrice?: number,
+  ) => {
+    // Determine mode from accounts state
+    const accountsState = loadAccountsState();
+    const mode = accountsState.activeAccountId ? "live" : "paper";
 
-  const position = paperState.positions[tokenId];
-  if (!position || position.shares <= 0) {
-    return { success: false, error: "Position not found or no shares" };
-  }
+    console.log(`[position:sell] Mode: ${mode}, tokenId: ${tokenId}`);
 
-  // Simulate selling at current price (with 1% slippage)
-  const currentPrice = position.currentPrice || position.avgEntryPrice;
-  const sellPrice = currentPrice * 0.99; // 1% slippage
-  const shares = position.shares;
-  const proceeds = shares * sellPrice;
-  const fees = proceeds * 0.001; // 0.1% fee
-  const netProceeds = proceeds - fees;
+    // ============ LIVE MODE ============
+    if (mode === "live") {
+      try {
+        // Initialize CLOB client if needed
+        if (!botService) {
+          return { success: false, error: "Bot service not initialized" };
+        }
 
-  // Calculate PnL
-  const entryValue = position.totalCost || position.avgEntryPrice * shares;
-  const pnl = netProceeds - entryValue;
+        // Get the CLOB client from botService (access internal clobClient)
+        const clobWrapper = (botService as any).clobClient;
+        if (!clobWrapper) {
+          // Try to initialize it
+          try {
+            await (botService as any).initializeClobClient();
+          } catch (e: any) {
+            return {
+              success: false,
+              error: `Failed to initialize CLOB client: ${e.message}`,
+            };
+          }
+        }
 
-  // Record the sell trade
-  const sellTrade = {
-    id: `sell-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    timestamp: Date.now(),
-    tokenId,
-    marketSlug: position.marketSlug,
-    outcome: position.outcome,
-    side: "SELL",
-    price: sellPrice,
-    shares,
-    usdValue: proceeds,
-    fees,
-    pnl,
-    targetWallet: "manual_sell",
-    tradeId: `manual-${Date.now()}`,
-  };
+        const clobClient = (botService as any).clobClient;
+        if (!clobClient) {
+          return {
+            success: false,
+            error: "CLOB client not available for live trading",
+          };
+        }
 
-  paperState.trades.push(sellTrade);
+        // Get token balance to determine how many shares we can sell
+        let sharesToSell = requestedShares;
+        if (!sharesToSell) {
+          try {
+            const tokenBalance = await clobClient.getTokenBalance(tokenId);
+            // Balance is in micro-units (6 decimals), convert to actual shares
+            const rawBalance = parseFloat(tokenBalance.balance) || 0;
+            sharesToSell = rawBalance / 1_000_000; // Convert from micro-units
+            console.log(
+              `[position:sell] Token balance (raw): ${rawBalance}, shares: ${sharesToSell}`,
+            );
+          } catch (e: any) {
+            console.error(
+              `[position:sell] Failed to get token balance: ${e.message}`,
+            );
+            sharesToSell = 0;
+          }
+        }
 
-  // Update balance
-  paperState.currentBalance =
-    (paperState.currentBalance || 10000) + netProceeds;
+        if (!sharesToSell || sharesToSell <= 0) {
+          return { success: false, error: "No shares to sell" };
+        }
 
-  // Update stats
-  if (!paperState.stats) paperState.stats = {};
-  paperState.stats.totalTrades = (paperState.stats.totalTrades || 0) + 1;
-  paperState.stats.totalFees = (paperState.stats.totalFees || 0) + fees;
-  paperState.stats.totalRealizedPnl =
-    (paperState.stats.totalRealizedPnl || 0) + pnl;
+        // Determine sell price - use provided price, or get market price
+        let sellPrice = requestedPrice;
+        if (!sellPrice) {
+          // Use a default price (the market bid price would be better but requires additional API call)
+          // For now, use 0.50 as a default market price - the order will fill at best available
+          sellPrice = 0.5;
+        }
 
-  if (pnl > 0) {
-    paperState.stats.winningTrades = (paperState.stats.winningTrades || 0) + 1;
-    paperState.stats.largestWin = Math.max(
-      paperState.stats.largestWin || 0,
+        // Apply slippage (sell at 2% below target to ensure fill)
+        const slippagePrice = Math.max(0.01, sellPrice * 0.98);
+
+        console.log(
+          `[position:sell] Placing SELL order: ${sharesToSell} shares @ $${slippagePrice.toFixed(4)}`,
+        );
+
+        // Place sell order
+        const orderResult = await clobClient.placeOrder({
+          tokenId,
+          side: "SELL",
+          price: slippagePrice,
+          size: sharesToSell,
+        });
+
+        if (orderResult.success) {
+          console.log(
+            `[position:sell] LIVE SELL SUCCESS: orderId=${orderResult.orderId}`,
+          );
+
+          // Add log entry
+          addLog({
+            id: `log-${Date.now()}`,
+            timestamp: Date.now(),
+            type: "profit",
+            side: "SELL",
+            marketName: tokenId.substring(0, 20) + "...",
+            outcome: "YES",
+            shares: sharesToSell,
+            price: slippagePrice,
+            total: sharesToSell * slippagePrice,
+            message: `[LIVE] Sold ${sharesToSell.toFixed(2)} shares @ $${slippagePrice.toFixed(4)}`,
+          });
+
+          return {
+            success: true,
+            orderId: orderResult.orderId,
+            shares: sharesToSell,
+            price: slippagePrice,
+            mode: "live",
+          };
+        } else {
+          console.error(
+            `[position:sell] LIVE SELL FAILED: ${orderResult.errorMessage}`,
+          );
+          return {
+            success: false,
+            error: orderResult.errorMessage || "Order failed",
+          };
+        }
+      } catch (e: any) {
+        console.error(`[position:sell] LIVE SELL ERROR: ${e.message}`);
+        return { success: false, error: e.message };
+      }
+    }
+
+    // ============ PAPER MODE ============
+    const paperState = readJsonFile("paper-state.json", {
+      positions: {},
+      trades: [],
+      currentBalance: 10000,
+      stats: {},
+    });
+
+    const position = paperState.positions[tokenId];
+    if (!position || position.shares <= 0) {
+      return { success: false, error: "Position not found or no shares" };
+    }
+
+    // Simulate selling at current price (with 1% slippage)
+    const currentPrice = position.currentPrice || position.avgEntryPrice;
+    const sellPrice = currentPrice * 0.99; // 1% slippage
+    const shares = position.shares;
+    const proceeds = shares * sellPrice;
+    const fees = proceeds * 0.001; // 0.1% fee
+    const netProceeds = proceeds - fees;
+
+    // Calculate PnL
+    const entryValue = position.totalCost || position.avgEntryPrice * shares;
+    const pnl = netProceeds - entryValue;
+
+    // Record the sell trade
+    const sellTrade = {
+      id: `sell-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      timestamp: Date.now(),
+      tokenId,
+      marketSlug: position.marketSlug,
+      outcome: position.outcome,
+      side: "SELL",
+      price: sellPrice,
+      shares,
+      usdValue: proceeds,
+      fees,
       pnl,
-    );
-  } else if (pnl < 0) {
-    paperState.stats.losingTrades = (paperState.stats.losingTrades || 0) + 1;
-    paperState.stats.largestLoss = Math.min(
-      paperState.stats.largestLoss || 0,
+      targetWallet: "manual_sell",
+      tradeId: `manual-${Date.now()}`,
+    };
+
+    paperState.trades.push(sellTrade);
+
+    // Update balance
+    paperState.currentBalance =
+      (paperState.currentBalance || 10000) + netProceeds;
+
+    // Update stats
+    if (!paperState.stats) paperState.stats = {};
+    paperState.stats.totalTrades = (paperState.stats.totalTrades || 0) + 1;
+    paperState.stats.totalFees = (paperState.stats.totalFees || 0) + fees;
+    paperState.stats.totalRealizedPnl =
+      (paperState.stats.totalRealizedPnl || 0) + pnl;
+
+    if (pnl > 0) {
+      paperState.stats.winningTrades =
+        (paperState.stats.winningTrades || 0) + 1;
+      paperState.stats.largestWin = Math.max(
+        paperState.stats.largestWin || 0,
+        pnl,
+      );
+    } else if (pnl < 0) {
+      paperState.stats.losingTrades = (paperState.stats.losingTrades || 0) + 1;
+      paperState.stats.largestLoss = Math.min(
+        paperState.stats.largestLoss || 0,
+        pnl,
+      );
+    }
+
+    // Close the position
+    position.shares = 0;
+    position.settled = true;
+    position.settlementPnl = pnl;
+
+    // Save state
+    writeJsonFile("paper-state.json", paperState);
+
+    // Add log entry
+    addLog({
+      id: `log-${Date.now()}`,
+      timestamp: Date.now(),
+      type: pnl >= 0 ? "profit" : "loss",
+      side: "SELL",
+      marketName: position.marketSlug,
+      outcome: position.outcome,
+      shares,
+      price: sellPrice,
+      total: netProceeds,
+      message: `Sold ${shares.toFixed(2)} shares @ $${sellPrice.toFixed(3)} for ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} PnL`,
+    });
+
+    return {
+      success: true,
       pnl,
-    );
-  }
-
-  // Close the position
-  position.shares = 0;
-  position.settled = true;
-  position.settlementPnl = pnl;
-
-  // Save state
-  writeJsonFile("paper-state.json", paperState);
-
-  // Add log entry
-  addLog({
-    id: `log-${Date.now()}`,
-    timestamp: Date.now(),
-    type: pnl >= 0 ? "profit" : "loss",
-    side: "SELL",
-    marketName: position.marketSlug,
-    outcome: position.outcome,
-    shares,
-    price: sellPrice,
-    total: netProceeds,
-    message: `Sold ${shares.toFixed(2)} shares @ $${sellPrice.toFixed(3)} for ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} PnL`,
-  });
-
-  return {
-    success: true,
-    pnl,
-    proceeds: netProceeds,
-    trade: sellTrade,
-  };
-});
+      proceeds: netProceeds,
+      trade: sellTrade,
+    };
+  },
+);
 
 // Get activity logs
 ipcMain.handle("logs:get", async () => {
@@ -2510,16 +2762,20 @@ ipcMain.handle("accounts:getTradingMode", async () => {
     currentBalance: 10000,
   });
 
+  // Get the bot's actual trading mode (may differ from accounts state if CLOB init failed)
+  const botActualMode = botService?.isRunning() ? botService.getMode() : null;
+
   if (state.activeAccountId === null) {
     // Paper trading mode
     return {
       mode: "paper",
+      botMode: botActualMode || "paper",
       activeAccount: null,
       paperBalance: paperState.currentBalance || 10000,
     };
   }
 
-  // Live trading mode
+  // Live trading mode (based on accounts.json)
   const activeAccount = state.accounts.find(
     (acc) => acc.id === state.activeAccountId,
   );
@@ -2527,6 +2783,7 @@ ipcMain.handle("accounts:getTradingMode", async () => {
     // Account not found, fall back to paper
     return {
       mode: "paper",
+      botMode: botActualMode || "paper",
       activeAccount: null,
       paperBalance: paperState.currentBalance || 10000,
     };
@@ -2543,8 +2800,13 @@ ipcMain.handle("accounts:getTradingMode", async () => {
     // Ignore errors
   }
 
+  // If bot is running but in a different mode than expected, report it
+  const expectedMode = "live";
+  const actualMode = botActualMode || expectedMode;
+
   return {
-    mode: "live",
+    mode: actualMode, // Use bot's actual mode, not the expected mode
+    botMode: actualMode,
     activeAccount: {
       id: activeAccount.id,
       name: activeAccount.name,

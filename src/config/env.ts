@@ -44,6 +44,7 @@ export interface EnvConfig {
   defaultSharesSize: number;
   proportionalMultiplier: number;
   minOrderSize: number;
+  minOrderShares: number;
   slippage: number;
   maxUsdPerTrade: number;
   maxUsdPerMarket: number;
@@ -121,6 +122,7 @@ export function loadEnvConfig(): EnvConfig {
     defaultSharesSize: getEnvNumber("DEFAULT_SHARES_SIZE", 10),
     proportionalMultiplier: getEnvNumber("PROPORTIONAL_MULTIPLIER", 0.01),
     minOrderSize: getEnvNumber("MIN_ORDER_SIZE", 0.01),
+    minOrderShares: getEnvNumber("MIN_ORDER_SHARES", 0.01),
     slippage: getEnvNumber("SLIPPAGE", 0.01),
     maxUsdPerTrade: getEnvNumber("MAX_USD_PER_TRADE", 100),
     maxUsdPerMarket: getEnvNumber("MAX_USD_PER_MARKET", 500),

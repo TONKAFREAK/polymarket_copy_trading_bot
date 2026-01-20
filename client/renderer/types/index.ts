@@ -131,6 +131,7 @@ export interface TradingConfig {
     fixedSharesSize: number;
     proportionalMultiplier: number;
     minOrderSize: number;
+    minOrderShares: number;
     slippage: number;
   };
   risk: {

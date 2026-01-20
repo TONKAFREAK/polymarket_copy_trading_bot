@@ -23,6 +23,7 @@ function getDefaultTradingConfig(env: EnvConfig): TradingConfig {
     fixedSharesSize: env.defaultSharesSize,
     proportionalMultiplier: env.proportionalMultiplier,
     minOrderSize: env.minOrderSize,
+    minOrderShares: env.minOrderShares,
     slippage: env.slippage,
   };
 }

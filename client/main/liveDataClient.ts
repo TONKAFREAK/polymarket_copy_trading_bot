@@ -543,77 +543,125 @@ export class LiveDataClient {
     try {
       // Fetch positions from Gamma API
       const url = `${GAMMA_API_URL}/positions?user=${this.walletAddress}`;
+      console.log(`[LiveDataClient] Fetching positions from: ${url}`);
       const data = await httpGet(url);
 
-      if (!Array.isArray(data)) {
+      console.log(`[LiveDataClient] Positions API response type: ${typeof data}, isArray: ${Array.isArray(data)}`);
+      if (data && typeof data === 'object') {
+        console.log(`[LiveDataClient] Response keys: ${Object.keys(data).slice(0, 10).join(', ')}`);
+      }
+
+      // Handle different response formats
+      let positionsArray: any[] = [];
+      if (Array.isArray(data)) {
+        positionsArray = data;
+      } else if (data && data.positions && Array.isArray(data.positions)) {
+        positionsArray = data.positions;
+      } else if (data && data.data && Array.isArray(data.data)) {
+        positionsArray = data.data;
+      }
+
+      if (positionsArray.length === 0) {
+        console.log(`[LiveDataClient] No positions found in response`);
         return { positions: [] };
       }
 
-      const positions: Position[] = data.map((pos: any) => {
-        const shares = parseFloat(pos.size || pos.shares || "0");
-        const avgPrice = parseFloat(pos.avgPrice || pos.average_price || "0");
-        const currentPrice = parseFloat(
-          pos.currentPrice || pos.price || avgPrice,
-        );
+      console.log(`[LiveDataClient] Found ${positionsArray.length} positions`);
+      // Log first position structure for debugging
+      if (positionsArray.length > 0) {
+        console.log(`[LiveDataClient] Sample position keys: ${Object.keys(positionsArray[0]).join(', ')}`);
+      }
+
+      const positions: Position[] = positionsArray.map((pos: any) => {
+        // Handle various field name formats from different API responses
+        const shares = parseFloat(pos.size || pos.shares || pos.amount || pos.balance || "0");
+        const avgPrice = parseFloat(pos.avgPrice || pos.averagePrice || pos.average_price || pos.entryPrice || "0");
+        const currentPrice = parseFloat(pos.currentPrice || pos.price || pos.marketPrice || avgPrice);
+        const tokenId = pos.tokenId || pos.token_id || pos.assetId || pos.asset_id || pos.asset || "";
 
         return {
-          tokenId: pos.tokenId || pos.asset,
-          conditionId: pos.conditionId,
-          outcome: pos.outcome || (pos.outcomeIndex === 0 ? "YES" : "NO"),
+          tokenId,
+          conditionId: pos.conditionId || pos.condition_id || pos.marketId || pos.market_id,
+          outcome: pos.outcome || pos.outcomeName || (pos.outcomeIndex === 0 ? "YES" : "NO"),
           shares,
           avgEntryPrice: avgPrice,
           currentPrice,
           currentValue: shares * currentPrice,
-          market: pos.title || pos.question,
-          marketSlug: pos.slug || pos.marketSlug,
-          isResolved: pos.resolved || false,
-          isRedeemable: pos.redeemable || false,
-          feesPaid: parseFloat(pos.feesPaid || "0"),
+          market: pos.title || pos.question || pos.marketTitle || pos.market_title,
+          marketSlug: pos.slug || pos.marketSlug || pos.market_slug,
+          isResolved: pos.resolved || pos.isResolved || false,
+          isRedeemable: pos.redeemable || pos.isRedeemable || false,
+          feesPaid: parseFloat(pos.feesPaid || pos.fees_paid || "0"),
         };
       });
 
-      return { positions: positions.filter((p) => p.shares > 0) };
-    } catch (e) {
-      console.error("[LiveDataClient] Failed to get positions:", e);
+      const filteredPositions = positions.filter((p) => p.shares > 0);
+      console.log(`[LiveDataClient] Returning ${filteredPositions.length} active positions`);
+      return { positions: filteredPositions };
+    } catch (e: any) {
+      console.error("[LiveDataClient] Failed to get positions:", e.message || e);
       return { positions: [] };
     }
   }
 
   async getTrades(): Promise<{ trades: Trade[] }> {
     try {
-      // Fetch trade history from CLOB API or Data API
+      // Fetch trade history from Data API
       const url = `${DATA_API_URL}/activity?user=${this.walletAddress}&limit=100`;
+      console.log(`[LiveDataClient] Fetching trades from: ${url}`);
       const data = await httpGet(url);
 
-      if (!Array.isArray(data)) {
+      console.log(`[LiveDataClient] Trades API response type: ${typeof data}, isArray: ${Array.isArray(data)}`);
+
+      // Handle different response formats
+      let tradesArray: any[] = [];
+      if (Array.isArray(data)) {
+        tradesArray = data;
+      } else if (data && data.trades && Array.isArray(data.trades)) {
+        tradesArray = data.trades;
+      } else if (data && data.activity && Array.isArray(data.activity)) {
+        tradesArray = data.activity;
+      } else if (data && data.data && Array.isArray(data.data)) {
+        tradesArray = data.data;
+      }
+
+      if (tradesArray.length === 0) {
+        console.log(`[LiveDataClient] No trades found in response`);
         return { trades: [] };
       }
 
-      const trades: Trade[] = data
-        .filter((item: any) => item.type === "trade" || item.side)
+      console.log(`[LiveDataClient] Found ${tradesArray.length} activity items`);
+      // Log first item structure for debugging
+      if (tradesArray.length > 0) {
+        console.log(`[LiveDataClient] Sample activity keys: ${Object.keys(tradesArray[0]).join(', ')}`);
+      }
+
+      const trades: Trade[] = tradesArray
+        .filter((item: any) => item.type === "trade" || item.side || item.tradeType)
         .map((trade: any, idx: number) => {
           const price = parseFloat(trade.price || "0");
-          const size = parseFloat(trade.size || trade.shares || "0");
+          const size = parseFloat(trade.size || trade.shares || trade.amount || "0");
 
           return {
-            id: trade.id || trade.transactionHash || `trade-${idx}`,
-            timestamp: new Date(trade.timestamp || trade.created_at).getTime(),
-            tokenId: trade.tokenId || trade.asset_id || trade.asset,
-            marketSlug: trade.slug || trade.marketSlug,
-            market: trade.title || trade.question,
-            outcome: trade.outcome || (trade.outcomeIndex === 0 ? "YES" : "NO"),
-            side: (trade.side || "BUY").toUpperCase() as "BUY" | "SELL",
+            id: trade.id || trade.transactionHash || trade.transaction_hash || `trade-${idx}`,
+            timestamp: new Date(trade.timestamp || trade.created_at || trade.createdAt || Date.now()).getTime(),
+            tokenId: trade.tokenId || trade.token_id || trade.asset_id || trade.assetId || trade.asset,
+            marketSlug: trade.slug || trade.marketSlug || trade.market_slug,
+            market: trade.title || trade.question || trade.marketTitle,
+            outcome: trade.outcome || trade.outcomeName || (trade.outcomeIndex === 0 ? "YES" : "NO"),
+            side: (trade.side || trade.tradeType || "BUY").toUpperCase() as "BUY" | "SELL",
             price,
             shares: size,
             usdValue: price * size,
-            fees: parseFloat(trade.fees || trade.fee || "0"),
+            fees: parseFloat(trade.fees || trade.fee || trade.feeAmount || "0"),
             pnl: trade.pnl !== undefined ? parseFloat(trade.pnl) : undefined,
           };
         });
 
+      console.log(`[LiveDataClient] Returning ${trades.length} trades`);
       return { trades };
-    } catch (e) {
-      console.error("[LiveDataClient] Failed to get trades:", e);
+    } catch (e: any) {
+      console.error("[LiveDataClient] Failed to get trades:", e.message || e);
       return { trades: [] };
     }
   }

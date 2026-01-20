@@ -1,5 +1,5 @@
-appId: com.polymarket.copytrader
-productName: Polymarket Copy Trader by TONKA
+appId: com.polymarket.pmcopy
+productName: PMcopy by TONKA
 copyright: Copyright © 2026
 directories:
   output: dist

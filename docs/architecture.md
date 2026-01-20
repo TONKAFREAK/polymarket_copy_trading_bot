@@ -7,16 +7,42 @@ This document provides a technical overview of the Polymarket Copy Trading Bot f
 The application is a hybrid **Electron** desktop app with a **Node.js** backend process.
 It follows a modular architecture separating the UI (Renderer), Main Process (Electron), and the Core Trading Logic.
 
-```mermaid
-graph TD
-    UI[Renderer Process (React/Next.js)] <--> IPC[Electron IPC Bridge]
-    IPC <--> Main[Main Process (Node.js)]
-    Main --> Service[Bot Service]
-    Service --> Watcher[Market Watcher]
-    Service --> Executor[Order Executor]
-    Service --> Risk[Risk Manager]
-    Watcher -- Polling/WS --> PolyAPI[Polymarket API]
-    Executor -- CLOB --> PolyCLOB[CLOB Client]
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  Electron Application                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                               │
+│  ┌─────────────────────────┐      ┌──────────────────────┐  │
+│  │   Renderer Process      │      │   Main Process       │  │
+│  │   (React + Next.js)     │◄────►│   (Node.js)          │  │
+│  │                         │ IPC  │                      │  │
+│  │ • Dashboard             │      │ • Bot Service        │  │
+│  │ • Settings              │      │ • IPC Handlers       │  │
+│  │ • Whales Tab            │      │ • File Persistence   │  │
+│  │ • Portfolio             │      │                      │  │
+│  └─────────────────────────┘      └──────────────────────┘  │
+│                                             │                │
+│                                             ▼                │
+│                                   ┌──────────────────────┐   │
+│                                   │   Trading Core       │   │
+│                                   │                      │   │
+│                                   │ • Watcher            │   │
+│                                   │ • Executor           │   │
+│                                   │ • Risk Manager       │   │
+│                                   │ • Paper Trading      │   │
+│                                   └──────────────────────┘   │
+│                                             │                │
+└─────────────────────────────────────────────┼────────────────┘
+                                              │
+                                              ▼
+                                    ┌──────────────────────┐
+                                    │ Polymarket APIs      │
+                                    │                      │
+                                    │ • CLOB (Orders)      │
+                                    │ • Data API (Activity)│
+                                    │ • Gamma API (Market) │
+                                    │ • WebSocket (RT Data)│
+                                    └──────────────────────┘
 ```
 
 ## Directory Structure

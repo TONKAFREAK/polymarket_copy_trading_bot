@@ -348,23 +348,27 @@ npm run dev -- paper reset|stats|config
 
 ### Dashboard
 
-**[Insert screenshot showing portfolio value, current positions, live balance]**
+![Screenshot](dashboard.png)
 
 ### Whale Trades
 
-**[Insert screenshot showing real-time whale trades with Side/Size/Entry/Wallet columns]**
+![Screenshot](whales.png)
 
 ### Whale Profile
 
-**[Insert screenshot showing trader stats, P&L chart, recent activity]**
+![Screenshot](wprofile.png)
 
 ### Performance
 
-**[Insert screenshot showing trade history, performance metrics, P&L visualization]**
+![Screenshot](performance.png)
+
+### Traders
+
+![Screenshot](traders.png)
 
 ### Settings
 
-**[Insert screenshot showing configuration options]**
+![Screenshot](settings.png)
 
 ---
 

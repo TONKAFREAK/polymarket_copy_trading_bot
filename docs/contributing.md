@@ -5,14 +5,18 @@ Thank you for your interest in contributing to the Polymarket Copy Trading Bot!
 ## How to Contribute
 
 ### Reporting Bugs
+
 If you find a bug, please open an issue on GitHub including:
+
 1.  Your OS and Node version.
 2.  Steps to reproduce the error.
 3.  Logs (remove any sensitive keys!).
 4.  Expected vs Actual behavior.
 
 ### Feature Requests
+
 We welcome ideas! Please describe:
+
 1.  The problem you are solving.
 2.  Your proposed solution.
 3.  Any alternatives you considered.
@@ -30,18 +34,18 @@ We welcome ideas! Please describe:
     npm run build
     ```
 4.  **Make your changes**.
-    -   Keep code style consistent (Prettier/ESLint configs included).
-    -   Add comments for complex logic.
+    - Keep code style consistent (Prettier/ESLint configs included).
+    - Add comments for complex logic.
 5.  **Test your changes**.
-    -   Run the bot in Paper Trading mode to verify logic.
+    - Run the bot in Paper Trading mode to verify logic.
 6.  **Commit** your changes with clear messages.
 7.  **Push** to your fork and submit a Pull Request.
 
 ## Code Standards
 
--   **TypeScript**: We use strict mode. Avoid `any` whenever possible.
--   **Logging**: Use the `logger` utility, do not use `console.log` directly in backend code.
--   **IPC**: Keep the IPC boundary clean. Data fetching logic belongs in `botService.ts` or `polymarket/`, not directly in `background.ts`.
+- **TypeScript**: We use strict mode. Avoid `any` whenever possible.
+- **Logging**: Use the `logger` utility, do not use `console.log` directly in backend code.
+- **IPC**: Keep the IPC boundary clean. Data fetching logic belongs in `botService.ts` or `polymarket/`, not directly in `background.ts`.
 
 ## License
 

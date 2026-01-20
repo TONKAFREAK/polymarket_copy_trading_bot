@@ -7,14 +7,14 @@ This guide covers the complete installation process for the Polymarket Copy Trad
 Before starting, ensure you have the following installed:
 
 1.  **Node.js**: Version 18.0.0 or higher is **required**.
-    *   Download: [nodejs.org](https://nodejs.org/)
-    *   Verify: `node --version`
+    - Download: [nodejs.org](https://nodejs.org/)
+    - Verify: `node --version`
 2.  **Git**: For version control.
-    *   Download: [git-scm.com](https://git-scm.com/)
-    *   Verify: `git --version`
+    - Download: [git-scm.com](https://git-scm.com/)
+    - Verify: `git --version`
 3.  **Polymarket Account**:
-    *   You need a funded Polygon (Matic) wallet address.
-    *   You need your API Keys (API Key, Secret, Passphrase). You can generate these in your Polymarket Profile settings.
+    - You need a funded Polygon (Matic) wallet address.
+    - You need your API Keys (API Key, Secret, Passphrase). You can generate these in your Polymarket Profile settings.
 
 ---
 
@@ -92,6 +92,7 @@ npm run build
 The application requires a `.env` file to store your credentials securely.
 
 1.  **Copy the example file:**
+
     ```bash
     cp .env.example .env
     # On Windows: copy .env.example .env
@@ -101,15 +102,15 @@ The application requires a `.env` file to store your credentials securely.
     Open the file in any text editor and fill in your details.
 
     **Required for Live Trading:**
-    *   `POLY_API_KEY`: Your Polymarket API Key
-    *   `POLY_API_SECRET`: Your Polymarket API Secret
-    *   `POLY_PASSPHRASE`: Your Polymarket Passphrase
-    *   `PRIVATE_KEY`: Your wallet's private key (without `0x`)
-    *   `POLY_FUNDER_ADDRESS`: Your public wallet address
+    - `POLY_API_KEY`: Your Polymarket API Key
+    - `POLY_API_SECRET`: Your Polymarket API Secret
+    - `POLY_PASSPHRASE`: Your Polymarket Passphrase
+    - `PRIVATE_KEY`: Your wallet's private key (without `0x`)
+    - `POLY_FUNDER_ADDRESS`: Your public wallet address
 
     **Optional/Defaults:**
-    *   `POLY_SIGNATURE_TYPE`: Set to `1` (Magic/Email) or `0` (Metamask).
-    *   `PAPER_TRADING`: Set to `true` to start in simulation mode.
+    - `POLY_SIGNATURE_TYPE`: Set to `1` (Magic/Email) or `0` (Metamask).
+    - `PAPER_TRADING`: Set to `true` to start in simulation mode.
 
 ---
 
@@ -120,12 +121,14 @@ The application requires a `.env` file to store your credentials securely.
 Use the development script to launch the app:
 
 **Windows:**
+
 ```cmd
 dev.bat
 # Select option 1
 ```
 
 **macOS / Linux:**
+
 ```bash
 ./dev.sh
 # Select option 1

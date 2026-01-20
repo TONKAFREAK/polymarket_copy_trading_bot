@@ -192,7 +192,7 @@ export class BotService {
         fixedUsdSize: 10,
         fixedSharesSize: 10,
         proportionalMultiplier: 0.01,
-        minOrderSize: 1,
+        minOrderSize: 0.2,
         slippage: 0.01,
       },
       risk: {

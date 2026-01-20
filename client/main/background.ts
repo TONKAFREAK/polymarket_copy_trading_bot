@@ -1743,6 +1743,172 @@ ipcMain.handle(
   },
 );
 
+// Fetch user profile stats from polymarket.com/api/profile/stats
+// Returns: { trades, largestWin, views, joinDate }
+ipcMain.handle(
+  "polymarket:getProfileStats",
+  async (_event, options: { proxyAddress: string; username?: string }) => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      let url = `https://polymarket.com/api/profile/stats?proxyAddress=${options.proxyAddress}`;
+      if (options.username) {
+        url += `&username=${options.username}`;
+      }
+
+      console.log("[ProfileStats] Fetching:", url);
+      const response = await fetch(url, {
+        headers: {
+          Accept: "*/*",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        console.error("[ProfileStats] Error:", response.status);
+        return null;
+      }
+
+      return await response.json();
+    } catch (e) {
+      console.error("[ProfileStats] Failed:", e);
+      return null;
+    }
+  },
+);
+
+// Fetch user positions from data-api
+// Returns array of positions with detailed info
+ipcMain.handle(
+  "polymarket:getUserPositions",
+  async (
+    _event,
+    options: {
+      address: string;
+      sortBy?: string; // CURRENT, INITIAL, PNL
+      sortDirection?: string; // ASC, DESC
+      limit?: number;
+      offset?: number;
+    },
+  ) => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const params = new URLSearchParams();
+      params.set("user", options.address);
+      params.set("sortBy", options.sortBy || "CURRENT");
+      params.set("sortDirection", options.sortDirection || "DESC");
+      params.set("sizeThreshold", ".1");
+      params.set("limit", String(options.limit || 50));
+      if (options.offset) params.set("offset", String(options.offset));
+
+      const url = `https://data-api.polymarket.com/positions?${params.toString()}`;
+      console.log("[UserPositions] Fetching:", url);
+
+      const response = await fetch(url, {
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        console.error("[UserPositions] Error:", response.status);
+        return [];
+      }
+
+      return await response.json();
+    } catch (e) {
+      console.error("[UserPositions] Failed:", e);
+      return [];
+    }
+  },
+);
+
+// Fetch user activity from data-api
+// Returns array of recent activities (trades, redeems, etc.)
+ipcMain.handle(
+  "polymarket:getUserActivity",
+  async (
+    _event,
+    options: {
+      address: string;
+      limit?: number;
+      offset?: number;
+    },
+  ) => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const url = `https://data-api.polymarket.com/activity?user=${options.address}&limit=${options.limit || 25}&offset=${options.offset || 0}`;
+      console.log("[UserActivity] Fetching:", url);
+
+      const response = await fetch(url, {
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        console.error("[UserActivity] Error:", response.status);
+        return [];
+      }
+
+      return await response.json();
+    } catch (e) {
+      console.error("[UserActivity] Failed:", e);
+      return [];
+    }
+  },
+);
+
+// Fetch user portfolio value from data-api
+// Returns: [{ user, value }]
+ipcMain.handle("polymarket:getUserValue", async (_event, address: string) => {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    const url = `https://data-api.polymarket.com/value?user=${address}`;
+    console.log("[UserValue] Fetching:", url);
+
+    const response = await fetch(url, {
+      headers: {
+        Accept: "application/json, text/plain, */*",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      console.error("[UserValue] Error:", response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    // Returns array, get first item
+    return Array.isArray(data) && data.length > 0 ? data[0] : null;
+  } catch (e) {
+    console.error("[UserValue] Failed:", e);
+    return null;
+  }
+});
+
 // Fetch market details by condition ID or slug
 ipcMain.handle(
   "polymarket:getMarket",
@@ -2231,38 +2397,42 @@ ipcMain.handle(
 );
 
 // Reset paper trading state
-ipcMain.handle("paper:reset", async () => {
-  const newState = {
-    enabled: true,
-    startingBalance: 10000,
-    currentBalance: 10000,
-    positions: {},
-    trades: [],
-    stats: {
-      totalTrades: 0,
-      winningTrades: 0,
-      losingTrades: 0,
-      totalRealizedPnl: 0,
-      totalUnrealizedPnl: 0,
-      totalFees: 0,
-      largestWin: 0,
-      largestLoss: 0,
-      winRate: 0,
-      profitFactor: 0,
-      avgTradeSize: 0,
-    },
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  };
-  writeJsonFile("paper-state.json", newState);
-  addLog({
-    id: `log-${Date.now()}`,
-    timestamp: Date.now(),
-    type: "info",
-    message: "Paper trading state reset",
-  });
-  return { success: true };
-});
+ipcMain.handle(
+  "paper:reset",
+  async (event, params?: { startingBalance?: number }) => {
+    const startingBalance = params?.startingBalance ?? 10000;
+    const newState = {
+      enabled: true,
+      startingBalance: startingBalance,
+      currentBalance: startingBalance,
+      positions: {},
+      trades: [],
+      stats: {
+        totalTrades: 0,
+        winningTrades: 0,
+        losingTrades: 0,
+        totalRealizedPnl: 0,
+        totalUnrealizedPnl: 0,
+        totalFees: 0,
+        largestWin: 0,
+        largestLoss: 0,
+        winRate: 0,
+        profitFactor: 0,
+        avgTradeSize: 0,
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    writeJsonFile("paper-state.json", newState);
+    addLog({
+      id: `log-${Date.now()}`,
+      timestamp: Date.now(),
+      type: "info",
+      message: "Paper trading state reset",
+    });
+    return { success: true };
+  },
+);
 
 // ========== Account Management IPC Handlers ==========
 

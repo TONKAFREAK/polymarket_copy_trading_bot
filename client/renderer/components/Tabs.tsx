@@ -278,7 +278,7 @@ export default function Tabs({
 
         {/* Content - scrollable area */}
         <div
-          className="p-5 flex-1 overflow-y-auto min-h-0 @container bg-[#0a0a0b]"
+          className="px-5 pt-5 flex-1 overflow-y-auto min-h-0 @container bg-[#0a0a0b]"
           style={{ maxHeight: "calc(100% - 2.75rem)" }}
         >
           {active?.kind === "dashboard" && (
@@ -500,13 +500,31 @@ function DashboardView({
           {activePositions.length > 0 && (
             <div className="@container flex items-center px-3 @[400px]:px-4 py-2 border-b border-white/[0.06] bg-white/[0.02]">
               <div className="flex-1 min-w-0 mr-2 @[400px]:mr-3 @[500px]:mr-4">
-                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Market</span>
+                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                  Market
+                </span>
               </div>
               <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
-                <div className="w-8 @[400px]:w-10 text-center"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Side</span></div>
-                <div className="hidden @[400px]:flex w-14 @[500px]:w-16 justify-end"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Shares</span></div>
-                <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Value</span></div>
-                <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">PnL</span></div>
+                <div className="w-8 @[400px]:w-10 text-center">
+                  <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                    Side
+                  </span>
+                </div>
+                <div className="hidden @[400px]:flex w-14 @[500px]:w-16 justify-end">
+                  <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                    Shares
+                  </span>
+                </div>
+                <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
+                  <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                    Value
+                  </span>
+                </div>
+                <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
+                  <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                    PnL
+                  </span>
+                </div>
               </div>
             </div>
           )}
@@ -938,14 +956,27 @@ function MiniPriceTooltip({ position }: { position: Position }) {
 }
 
 // ========== Table Header Component ==========
-function TableHeader({ columns }: { columns: { label: string; width: string; align?: 'left' | 'right' | 'center'; hideBelow?: string }[] }) {
+function TableHeader({
+  columns,
+}: {
+  columns: {
+    label: string;
+    width: string;
+    align?: "left" | "right" | "center";
+    hideBelow?: string;
+  }[];
+}) {
   return (
     <div className="@container flex items-center px-3 @[400px]:px-4 py-2 border-b border-white/[0.06] bg-white/[0.02]">
       {columns.map((col, idx) => (
         <div
           key={idx}
-          className={`${col.width} ${col.hideBelow || ''} ${
-            col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left'
+          className={`${col.width} ${col.hideBelow || ""} ${
+            col.align === "right"
+              ? "text-right"
+              : col.align === "center"
+                ? "text-center"
+                : "text-left"
           }`}
         >
           <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
@@ -1075,8 +1106,11 @@ function HoldingRow({
 
         {/* PnL */}
         <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
-          <span className={`text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums ${pnlColor}`}>
-            {position.pnl >= 0 ? "+" : ""}{formatValue(position.pnl)}
+          <span
+            className={`text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums ${pnlColor}`}
+          >
+            {position.pnl >= 0 ? "+" : ""}
+            {formatValue(position.pnl)}
           </span>
         </div>
       </div>
@@ -1770,26 +1804,31 @@ function LogRow({ log }: { log: TradeLog }) {
           </span>
 
           {/* Result */}
-          {log.type === "copy" ? (
-            <>
-              <span className="text-emerald-400">→ COPIED</span>
-              <span className="text-white/70">
-                {(log.yourShares ?? 0).toFixed(1)} @ $
-                {(log.yourPrice ?? 0).toFixed(3)} → $
-                {(log.yourTotal ?? 0).toFixed(2)}
-              </span>
-            </>
-          ) : log.type === "skip" ? (
-            <span className="text-amber-400">
-              → SKIP: {log.copyError || log.message || "filtered"}
-            </span>
-          ) : log.type === "target" ? (
-            <span className="text-cyan-400">→ DETECTED</span>
-          ) : log.type === "error" ? (
-            <span className="text-rose-400">
-              → ERR: {log.copyError || log.message}
-            </span>
-          ) : null}
+          {/* Result — always on new line */}
+          {log.type && (
+            <div className="w-full flex items-center gap-2 mt-0.5">
+              {log.type === "copy" ? (
+                <>
+                  <span className="text-emerald-400">→ COPIED</span>
+                  <span className="text-white/70">
+                    {(log.yourShares ?? 0).toFixed(1)} @ $
+                    {(log.yourPrice ?? 0).toFixed(3)} → $
+                    {(log.yourTotal ?? 0).toFixed(2)}
+                  </span>
+                </>
+              ) : log.type === "skip" ? (
+                <span className="text-amber-400">
+                  → SKIP: {log.copyError || log.message || "filtered"}
+                </span>
+              ) : log.type === "target" ? (
+                <span className="text-cyan-400">→ DETECTED</span>
+              ) : log.type === "error" ? (
+                <span className="text-rose-400">
+                  → ERR: {log.copyError || log.message}
+                </span>
+              ) : null}
+            </div>
+          )}
 
           {/* Latency */}
           {latencyDisplay && (
@@ -1951,14 +1990,36 @@ function PortfolioView({
           <>
             <div className="@container flex items-center px-3 @[400px]:px-4 py-2 border-b border-white/[0.06] bg-white/[0.02]">
               <div className="flex-1 min-w-0 mr-2 @[400px]:mr-3 @[500px]:mr-4">
-                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Market</span>
+                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                  Market
+                </span>
               </div>
               <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
-                <div className="w-8 @[400px]:w-10 text-center"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Side</span></div>
-                <div className="hidden @[400px]:flex w-14 @[500px]:w-16 justify-end"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Shares</span></div>
-                <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Value</span></div>
-                <div className="hidden @[500px]:flex w-16 @[600px]:w-20 justify-end"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Price</span></div>
-                <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">PnL</span></div>
+                <div className="w-8 @[400px]:w-10 text-center">
+                  <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                    Side
+                  </span>
+                </div>
+                <div className="hidden @[400px]:flex w-14 @[500px]:w-16 justify-end">
+                  <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                    Shares
+                  </span>
+                </div>
+                <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
+                  <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                    Value
+                  </span>
+                </div>
+                <div className="hidden @[500px]:flex w-16 @[600px]:w-20 justify-end">
+                  <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                    Price
+                  </span>
+                </div>
+                <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
+                  <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                    PnL
+                  </span>
+                </div>
                 <div className="w-14 @[400px]:w-16 @[500px]:w-18"></div>
               </div>
             </div>
@@ -1987,12 +2048,26 @@ function PortfolioView({
           </div>
           <div className="@container flex items-center px-3 @[400px]:px-4 py-2 border-b border-white/[0.06] bg-white/[0.02]">
             <div className="flex-1 min-w-0 mr-2 @[400px]:mr-3 @[500px]:mr-4">
-              <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Market</span>
+              <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                Market
+              </span>
             </div>
             <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
-              <div className="w-8 @[400px]:w-10 text-center"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Side</span></div>
-              <div className="hidden @[350px]:flex w-12 @[400px]:w-14 justify-center"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Status</span></div>
-              <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">PnL</span></div>
+              <div className="w-8 @[400px]:w-10 text-center">
+                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                  Side
+                </span>
+              </div>
+              <div className="hidden @[350px]:flex w-12 @[400px]:w-14 justify-center">
+                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                  Status
+                </span>
+              </div>
+              <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
+                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                  PnL
+                </span>
+              </div>
             </div>
           </div>
           <div className="divide-y divide-white/[0.04] max-h-[300px] overflow-y-auto">
@@ -2095,8 +2170,11 @@ function PositionRowWithSell({
 
         {/* PnL */}
         <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
-          <span className={`text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums ${pnlColor}`}>
-            {position.pnl >= 0 ? "+" : ""}{formatValue(position.pnl)}
+          <span
+            className={`text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums ${pnlColor}`}
+          >
+            {position.pnl >= 0 ? "+" : ""}
+            {formatValue(position.pnl)}
           </span>
         </div>
 
@@ -2206,8 +2284,11 @@ function ClosedPositionRow({ position }: { position: Position }) {
 
         {/* PnL */}
         <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
-          <span className={`text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums ${pnlColor}`}>
-            {pnl >= 0 ? "+" : ""}{formatValue(pnl)}
+          <span
+            className={`text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums ${pnlColor}`}
+          >
+            {pnl >= 0 ? "+" : ""}
+            {formatValue(pnl)}
           </span>
         </div>
       </div>
@@ -2524,18 +2605,46 @@ function PerformanceView({
           <>
             <div className="@container flex items-center px-3 @[400px]:px-4 py-2 border-b border-white/[0.06] bg-white/[0.02]">
               <div className="w-10 @[400px]:w-12 @[500px]:w-14 flex-shrink-0 mr-2 @[400px]:mr-3">
-                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Time</span>
+                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                  Time
+                </span>
               </div>
               <div className="flex-1 min-w-0 mr-2 @[400px]:mr-3 @[500px]:mr-4">
-                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Market</span>
+                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                  Market
+                </span>
               </div>
               <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
-                <div className="w-10 @[400px]:w-12 @[500px]:w-14 text-center"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Side</span></div>
-                <div className="hidden @[350px]:flex w-8 @[400px]:w-10 justify-center"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Bet</span></div>
-                <div className="hidden @[450px]:flex w-12 @[500px]:w-14 justify-end"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Shares</span></div>
-                <div className="w-12 @[400px]:w-14 @[500px]:w-16 text-right"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Value</span></div>
-                <div className="hidden @[500px]:flex w-14 @[600px]:w-16 justify-end"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">Price</span></div>
-                <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right"><span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">PnL</span></div>
+                <div className="w-10 @[400px]:w-12 @[500px]:w-14 text-center">
+                  <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                    Side
+                  </span>
+                </div>
+                <div className="hidden @[350px]:flex w-8 @[400px]:w-10 justify-center">
+                  <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                    Bet
+                  </span>
+                </div>
+                <div className="hidden @[450px]:flex w-12 @[500px]:w-14 justify-end">
+                  <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                    Shares
+                  </span>
+                </div>
+                <div className="w-12 @[400px]:w-14 @[500px]:w-16 text-right">
+                  <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                    Value
+                  </span>
+                </div>
+                <div className="hidden @[500px]:flex w-14 @[600px]:w-16 justify-end">
+                  <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                    Price
+                  </span>
+                </div>
+                <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
+                  <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                    PnL
+                  </span>
+                </div>
               </div>
             </div>
             <div className="divide-y divide-white/[0.04] max-h-[500px] overflow-y-auto">
@@ -2599,7 +2708,10 @@ function TradeHistoryRow({
     if (mins < 60) return `${mins}m`;
     if (hrs < 24) return `${hrs}h`;
     if (days < 7) return `${days}d`;
-    return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return new Date(ts).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
   };
 
   return (
@@ -2677,7 +2789,9 @@ function TradeHistoryRow({
 
         {/* PnL */}
         <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
-          <span className={`text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums ${pnlColor}`}>
+          <span
+            className={`text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums ${pnlColor}`}
+          >
             {hasPnl
               ? `${trade.pnl! >= 0 ? "+" : ""}${formatValue(trade.pnl!)}`
               : "—"}
@@ -3720,17 +3834,17 @@ function TraderCard({
               // Handle different possible response formats
               let rawTs = point.t || point.timestamp || point.time;
               let timestamp: number | null = null;
-              
+
               if (rawTs) {
                 // If it's a number, check if it's seconds (< 1e12) or milliseconds
-                if (typeof rawTs === 'number') {
+                if (typeof rawTs === "number") {
                   timestamp = rawTs < 1e12 ? rawTs * 1000 : rawTs;
                 } else {
                   // It's a string, parse it
                   timestamp = new Date(rawTs).getTime();
                 }
               }
-              
+
               const pnl =
                 point.p !== undefined
                   ? parseFloat(point.p)
@@ -3740,7 +3854,12 @@ function TraderCard({
                       ? parseFloat(point.value)
                       : null;
 
-              if (timestamp && !isNaN(timestamp) && pnl !== null && !isNaN(pnl)) {
+              if (
+                timestamp &&
+                !isNaN(timestamp) &&
+                pnl !== null &&
+                !isNaN(pnl)
+              ) {
                 return { timestamp, pnl };
               }
               return null;
@@ -3814,7 +3933,7 @@ function TraderCard({
   const getFilteredHistory = () => {
     if (pnlHistory.length === 0) return [];
     if (selectedTimeframe === "all") return pnlHistory;
-    
+
     const now = Date.now();
     const cutoffs = {
       "1d": now - 24 * 60 * 60 * 1000,
@@ -4184,7 +4303,10 @@ function TraderCard({
               <span className="text-white/40 ml-1.5">
                 {(() => {
                   // Handle both seconds and milliseconds timestamps
-                  const ts = chartHover.timestamp < 1e12 ? chartHover.timestamp * 1000 : chartHover.timestamp;
+                  const ts =
+                    chartHover.timestamp < 1e12
+                      ? chartHover.timestamp * 1000
+                      : chartHover.timestamp;
                   return new Date(ts).toLocaleDateString("en-US", {
                     month: "short",
                     day: "numeric",
@@ -4641,18 +4763,59 @@ function WhalesView() {
     const fetchProfile = async () => {
       setLoadingProfile(true);
       try {
-        const [profile, pnlData] = await Promise.all([
-          window.ipc?.invoke("polymarket:getProfile", selectedWallet),
-          window.ipc?.invoke("polymarket:getUserPnl", {
-            address: selectedWallet,
-            interval: "all",
-            fidelity: "1d",
-          }),
-        ]);
+        // First fetch basic profile to get username
+        const profile = await window.ipc?.invoke<any>(
+          "polymarket:getProfile",
+          selectedWallet,
+        );
+
+        // Then fetch all other data in parallel
+        const [pnlData, profileStats, positions, activity, valueData] =
+          await Promise.all([
+            window.ipc?.invoke<any>("polymarket:getUserPnl", {
+              address: selectedWallet,
+              interval: "1m",
+              fidelity: "1d",
+            }),
+            window.ipc?.invoke<any>("polymarket:getProfileStats", {
+              proxyAddress: selectedWallet,
+              username: profile?.name || undefined,
+            }),
+            window.ipc?.invoke<any[]>("polymarket:getUserPositions", {
+              address: selectedWallet,
+              sortBy: "CURRENT",
+              sortDirection: "DESC",
+              limit: 20,
+            }),
+            window.ipc?.invoke<any[]>("polymarket:getUserActivity", {
+              address: selectedWallet,
+              limit: 25,
+            }),
+            window.ipc?.invoke<{ user: string; value: number } | null>(
+              "polymarket:getUserValue",
+              selectedWallet,
+            ),
+          ]);
+
+        // Calculate total PnL from positions
+        let totalPnl = 0;
+        let totalVolume = 0;
+        if (Array.isArray(positions)) {
+          positions.forEach((pos: any) => {
+            totalPnl += parseFloat(pos.cashPnl || 0);
+            totalVolume += parseFloat(pos.totalBought || 0);
+          });
+        }
 
         setWalletProfile({
           ...(profile && typeof profile === "object" ? profile : {}),
           pnlHistory: pnlData,
+          stats: profileStats, // { trades, largestWin, views, joinDate }
+          positions: positions || [],
+          activity: activity || [],
+          portfolioValue: valueData?.value || 0,
+          calculatedPnl: totalPnl,
+          calculatedVolume: totalVolume,
         });
       } catch (e) {
         console.error("Failed to fetch profile:", e);
@@ -4683,38 +4846,38 @@ function WhalesView() {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div>
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold text-white">Whale Trades</h2>
-            <p className="text-xs text-white/40">
-              Track large orders in real-time
-              {lastUpdated && !loading && (
-                <span className="ml-2 text-white/30">
-                  • Updated {timeAgo(lastUpdated)}
-                </span>
-              )}
-            </p>
-          </div>
-          {/* Refresh button */}
-          <button
-            onClick={handleRefresh}
-            disabled={loading || refreshing}
-            className="p-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white/50 hover:text-white/70 transition-colors disabled:opacity-50"
-          >
-            <svg
-              className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+            {/* Refresh button */}
+            <button
+              onClick={handleRefresh}
+              disabled={loading || refreshing}
+              className="p-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white/40 hover:text-white/60 transition-colors disabled:opacity-50"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
-          </button>
+              <svg
+                className={`w-3 h-3 ${refreshing ? "animate-spin" : ""}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+            </button>
+          </div>
+          <p className="text-xs text-white/40">
+            Track large orders in real-time
+            {lastUpdated && !loading && (
+              <span className="ml-2 text-white/30">
+                • Updated {timeAgo(lastUpdated)}
+              </span>
+            )}
+          </p>
         </div>
 
         {/* Size filter */}
@@ -4802,13 +4965,13 @@ function WhalesView() {
       {!loading && !error && trades.length > 0 && (
         <div className="panel p-0">
           {/* Table header */}
-          <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-white/5 text-[10px] text-white/40 uppercase tracking-wide">
+          <div className="grid grid-cols-12 gap-1 px-4 py-2 border-b border-white/5 text-[10px] text-white/40 uppercase tracking-wide">
             <div className="col-span-1">Time</div>
-            <div className="col-span-4">Market</div>
-            <div className="col-span-1 text-center">Side</div>
-            <div className="col-span-2 text-right">Size</div>
+            <div className="col-span-6">Market</div>
+            <div className="col-span-1 text-right">Side</div>
+            <div className="col-span-1 text-right">Size</div>
             <div className="col-span-1 text-right">Entry</div>
-            <div className="col-span-3 text-right">Wallet</div>
+            <div className="col-span-2 text-right">Wallet</div>
           </div>
 
           {/* Trades */}
@@ -4816,7 +4979,7 @@ function WhalesView() {
             {trades.map((trade) => (
               <div
                 key={trade.id}
-                className="grid grid-cols-12 gap-2 px-4 py-3 hover:bg-white/[0.02] transition-colors items-center"
+                className="grid grid-cols-12 gap-1 px-4 py-3 hover:bg-white/[0.02] transition-colors items-center"
               >
                 {/* Time */}
                 <div className="col-span-1">
@@ -4826,7 +4989,7 @@ function WhalesView() {
                 </div>
 
                 {/* Market */}
-                <div className="col-span-4 flex items-center gap-2 min-w-0">
+                <div className="col-span-6 flex items-center gap-2 min-w-0">
                   {trade.marketImage ? (
                     <img
                       src={trade.marketImage}
@@ -4859,7 +5022,7 @@ function WhalesView() {
                 </div>
 
                 {/* Side */}
-                <div className="col-span-1 flex justify-center">
+                <div className="col-span-1 flex justify-end">
                   <span
                     className={`px-2 py-0.5 text-[10px] font-medium ${
                       trade.outcome === "YES"
@@ -4872,7 +5035,7 @@ function WhalesView() {
                 </div>
 
                 {/* Size */}
-                <div className="col-span-2 text-right">
+                <div className="col-span-1 text-right">
                   <span
                     className={`text-sm font-mono font-semibold ${
                       trade.side === "BUY"
@@ -4892,7 +5055,7 @@ function WhalesView() {
                 </div>
 
                 {/* Wallet */}
-                <div className="col-span-3 text-right">
+                <div className="col-span-2 text-right">
                   <button
                     onClick={() => setSelectedWallet(trade.walletAddress)}
                     className="text-xs font-mono text-white/50 hover:text-emerald-400 transition-colors truncate max-w-full"
@@ -4915,11 +5078,11 @@ function WhalesView() {
           onClick={() => setSelectedWallet(null)}
         >
           <div
-            className="bg-[#111113] border border-white/10 w-full max-w-lg max-h-[80vh] overflow-y-auto"
+            className="bg-[#111113] border border-white/10 w-full max-w-2xl max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/5 sticky top-0 bg-[#111113] z-10">
               <h3 className="text-lg font-semibold text-white">
                 Trader Profile
               </h3>
@@ -4947,7 +5110,12 @@ function WhalesView() {
             <div className="p-5">
               {loadingProfile ? (
                 <div className="flex items-center justify-center py-12">
-                  <div className="w-5 h-5 border-2 border-white/20 border-t-emerald-400 rounded-full animate-spin" />
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="w-6 h-6 border-2 border-white/20 border-t-emerald-400 rounded-full animate-spin" />
+                    <span className="text-white/40 text-sm">
+                      Loading profile data...
+                    </span>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -4957,7 +5125,7 @@ function WhalesView() {
                       <img
                         src={walletProfile.profileImage}
                         alt=""
-                        className="w-16 h-16 object-cover"
+                        className="w-16 h-16 rounded-lg object-cover"
                       />
                     ) : (
                       <UniqueAvatar
@@ -4966,80 +5134,251 @@ function WhalesView() {
                         size={64}
                       />
                     )}
-                    <div>
-                      <h4 className="text-lg font-semibold text-white">
-                        {walletProfile?.name ||
-                          walletProfile?.pseudonym ||
-                          "Anonymous Trader"}
-                      </h4>
-                      <p className="text-xs text-white/40 font-mono">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-lg font-semibold text-white">
+                          {walletProfile?.name ||
+                            walletProfile?.pseudonym ||
+                            "Anonymous Trader"}
+                        </h4>
+                        {walletProfile?.stats?.joinDate && (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-white/5 text-white/40 rounded">
+                            Joined {walletProfile.stats.joinDate}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-white/40 font-mono mt-0.5">
                         {selectedWallet.slice(0, 10)}...
                         {selectedWallet.slice(-8)}
                       </p>
-                      {walletProfile?.xUsername && (
-                        <a
-                          href={`https://x.com/${walletProfile.xUsername}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-emerald-400 hover:underline"
-                        >
-                          @{walletProfile.xUsername}
-                        </a>
-                      )}
+                      <div className="flex items-center gap-3 mt-1">
+                        {walletProfile?.xUsername && (
+                          <a
+                            href={`https://x.com/${walletProfile.xUsername}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-emerald-400 hover:underline"
+                          >
+                            @{walletProfile.xUsername}
+                          </a>
+                        )}
+                        {walletProfile?.stats?.views && (
+                          <span className="text-xs text-white/30">
+                            👁 {walletProfile.stats.views.toLocaleString()}{" "}
+                            views
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
                   {/* Bio */}
                   {walletProfile?.bio && (
-                    <div className="bg-white/[0.02] border border-white/5 p-3">
+                    <div className="bg-white/[0.02] border border-white/5 p-3 rounded">
                       <p className="text-sm text-white/60">
                         {walletProfile.bio}
                       </p>
                     </div>
                   )}
 
-                  {/* Stats */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="bg-white/[0.02] border border-white/5 p-3">
+                  {/* Main Stats */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="bg-white/[0.02] border border-white/5 p-3 rounded">
+                      <p className="text-[10px] text-white/40 mb-1">
+                        Portfolio Value
+                      </p>
+                      <p className="text-lg font-mono font-semibold text-white">
+                        {formatCurrency(walletProfile?.portfolioValue || 0)}
+                      </p>
+                    </div>
+                    <div className="bg-white/[0.02] border border-white/5 p-3 rounded">
                       <p className="text-[10px] text-white/40 mb-1">
                         Total PnL
                       </p>
                       <p
                         className={`text-lg font-mono font-semibold ${
-                          (walletProfile?.pnl || 0) >= 0
+                          (walletProfile?.calculatedPnl || 0) >= 0
                             ? "text-emerald-400"
                             : "text-rose-400"
                         }`}
                       >
-                        {formatCurrency(walletProfile?.pnl || 0)}
+                        {walletProfile?.calculatedPnl >= 0 ? "+" : ""}
+                        {formatCurrency(walletProfile?.calculatedPnl || 0)}
                       </p>
                     </div>
-                    <div className="bg-white/[0.02] border border-white/5 p-3">
+                    <div className="bg-white/[0.02] border border-white/5 p-3 rounded">
                       <p className="text-[10px] text-white/40 mb-1">Volume</p>
                       <p className="text-lg font-mono text-white/80">
-                        {formatCurrency(walletProfile?.volume || 0)}
+                        {formatCurrency(walletProfile?.calculatedVolume || 0)}
                       </p>
                     </div>
-                    <div className="bg-white/[0.02] border border-white/5 p-3">
+                    <div className="bg-white/[0.02] border border-white/5 p-3 rounded">
                       <p className="text-[10px] text-white/40 mb-1">
-                        Positions
+                        Total Trades
                       </p>
                       <p className="text-lg font-mono text-white/80">
-                        {walletProfile?.positions || 0}
+                        {walletProfile?.stats?.trades || 0}
                       </p>
                     </div>
                   </div>
+
+                  {/* Secondary Stats */}
+                  {walletProfile?.stats?.largestWin > 0 && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="bg-emerald-500/5 border border-emerald-500/20 p-3 rounded">
+                        <p className="text-[10px] text-emerald-400/60 mb-1">
+                          Largest Win
+                        </p>
+                        <p className="text-lg font-mono font-semibold text-emerald-400">
+                          +{formatCurrency(walletProfile.stats.largestWin)}
+                        </p>
+                      </div>
+                      <div className="bg-white/[0.02] border border-white/5 p-3 rounded">
+                        <p className="text-[10px] text-white/40 mb-1">
+                          Active Positions
+                        </p>
+                        <p className="text-lg font-mono text-white/80">
+                          {Array.isArray(walletProfile?.positions)
+                            ? walletProfile.positions.filter(
+                                (p: any) => p.size > 0,
+                              ).length
+                            : 0}
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* P&L History Chart */}
                   {walletProfile?.pnlHistory &&
                     Array.isArray(walletProfile.pnlHistory) &&
                     walletProfile.pnlHistory.length > 1 && (
-                      <div className="bg-white/[0.02] border border-white/5 p-3">
+                      <div className="bg-white/[0.02] border border-white/5 p-3 rounded">
                         <p className="text-[10px] text-white/40 mb-2">
-                          P&L History
+                          P&L History (30 days)
                         </p>
-                        <div className="h-24">
+                        <div className="h-28">
                           <WalletPnlChart data={walletProfile.pnlHistory} />
+                        </div>
+                      </div>
+                    )}
+
+                  {/* Top Positions */}
+                  {Array.isArray(walletProfile?.positions) &&
+                    walletProfile.positions.length > 0 && (
+                      <div className="bg-white/[0.02] border border-white/5 rounded overflow-hidden">
+                        <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
+                          <p className="text-[10px] text-white/40 uppercase tracking-wider">
+                            Top Positions
+                          </p>
+                          <span className="text-[10px] text-white/30">
+                            {walletProfile.positions.length} total
+                          </span>
+                        </div>
+                        <div className="divide-y divide-white/5 max-h-[200px] overflow-y-auto">
+                          {walletProfile.positions
+                            .slice(0, 5)
+                            .map((pos: any, idx: number) => (
+                              <div
+                                key={idx}
+                                className="flex items-center gap-3 px-3 py-2.5 hover:bg-white/[0.02]"
+                              >
+                                {pos.icon && (
+                                  <img
+                                    src={pos.icon}
+                                    alt=""
+                                    className="w-8 h-8 rounded object-cover flex-shrink-0"
+                                  />
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs text-white/80 truncate">
+                                    {pos.title || pos.slug}
+                                  </p>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <span
+                                      className={`text-[10px] px-1 py-0.5 ${
+                                        pos.outcome === "Yes" ||
+                                        pos.outcome === "YES"
+                                          ? "bg-emerald-500/15 text-emerald-400"
+                                          : "bg-rose-500/15 text-rose-400"
+                                      }`}
+                                    >
+                                      {pos.outcome}
+                                    </span>
+                                    <span className="text-[10px] text-white/40">
+                                      {pos.size?.toFixed(1)} shares
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-xs font-mono text-white/80">
+                                    {formatCurrency(pos.currentValue || 0)}
+                                  </p>
+                                  <p
+                                    className={`text-[10px] font-mono ${pos.cashPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}
+                                  >
+                                    {pos.cashPnl >= 0 ? "+" : ""}
+                                    {formatCurrency(pos.cashPnl || 0)}
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+
+                  {/* Recent Activity */}
+                  {Array.isArray(walletProfile?.activity) &&
+                    walletProfile.activity.length > 0 && (
+                      <div className="bg-white/[0.02] border border-white/5 rounded overflow-hidden">
+                        <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
+                          <p className="text-[10px] text-white/40 uppercase tracking-wider">
+                            Recent Activity
+                          </p>
+                          <span className="text-[10px] text-white/30">
+                            {walletProfile.activity.length} trades
+                          </span>
+                        </div>
+                        <div className="divide-y divide-white/5 max-h-[200px] overflow-y-auto">
+                          {walletProfile.activity
+                            .slice(0, 8)
+                            .map((act: any, idx: number) => (
+                              <div
+                                key={idx}
+                                className="flex items-center gap-3 px-3 py-2 hover:bg-white/[0.02]"
+                              >
+                                <div className="flex-shrink-0">
+                                  <span
+                                    className={`text-[9px] font-bold px-1.5 py-0.5 ${
+                                      act.side === "BUY"
+                                        ? "bg-emerald-500/15 text-emerald-400"
+                                        : "bg-rose-500/15 text-rose-400"
+                                    }`}
+                                  >
+                                    {act.side}
+                                  </span>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs text-white/70 truncate">
+                                    {act.title || "Unknown Market"}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`text-[9px] px-1 py-0.5 ${
+                                      act.outcome === "Up" ||
+                                      act.outcome === "Yes"
+                                        ? "bg-emerald-500/10 text-emerald-300"
+                                        : "bg-rose-500/10 text-rose-300"
+                                    }`}
+                                  >
+                                    {act.outcome}
+                                  </span>
+                                  <span className="text-xs font-mono text-white/60">
+                                    {formatCurrency(act.usdcSize || 0)}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
                         </div>
                       </div>
                     )}
@@ -5050,7 +5389,7 @@ function WhalesView() {
                       href={`https://polymarket.com/profile/${selectedWallet}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex-1 px-4 py-2 text-sm font-medium text-center bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 transition-colors"
+                      className="flex-1 px-4 py-2 text-sm font-medium text-center bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 transition-colors rounded"
                     >
                       View on Polymarket
                     </a>
@@ -5058,7 +5397,7 @@ function WhalesView() {
                       onClick={() => {
                         navigator.clipboard.writeText(selectedWallet);
                       }}
-                      className="px-4 py-2 text-sm font-medium bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 transition-colors"
+                      className="px-4 py-2 text-sm font-medium bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 transition-colors rounded"
                     >
                       Copy Address
                     </button>
@@ -5366,7 +5705,9 @@ function SettingsView({
         "Are you sure you want to reset paper trading? This will clear all positions and trades.",
       )
     ) {
-      await window.ipc?.invoke("paper:reset");
+      const startingBalance =
+        localConfig?.paperTrading?.startingBalance ?? 10000;
+      await window.ipc?.invoke("paper:reset", { startingBalance });
     }
   };
 

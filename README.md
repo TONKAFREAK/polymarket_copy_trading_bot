@@ -1,6 +1,10 @@
-# Polymarket Copy Trader
+# Polymarket Copy Trading Bot 🚀
 
-A production-grade CLI copy-trading bot for Polymarket prediction markets. Automatically copies trades from target wallets to your own wallet.
+A professional-grade copy trading platform for Polymarket prediction markets. Monitor whale traders in real-time and automatically copy their trades with advanced risk management features.
+
+![Screenshot](hero.png)
+
+---
 
 ## ⚠️ IMPORTANT DISCLAIMER
 
@@ -10,8 +14,10 @@ A production-grade CLI copy-trading bot for Polymarket prediction markets. Autom
 - You may lose all of your invested capital
 - Past performance does not guarantee future results
 - Only trade with money you can afford to lose
-- Always start with dry-run mode and small amounts
-- The developers are not responsible for any financial losses
+- Always start with paper trading and small amounts
+- Keep your API credentials secure and never share them
+- Monitor the bot regularly and never leave it unattended
+- Be aware of tax implications in your jurisdiction
 
 **USE AT YOUR OWN RISK.**
 
@@ -19,282 +25,209 @@ A production-grade CLI copy-trading bot for Polymarket prediction markets. Autom
 
 ## Features
 
-- 🎯 **Multi-target tracking**: Watch multiple wallets simultaneously
-- ⚡ **Fast polling**: Detect trades within 2-3 seconds
-- 🔄 **Automatic execution**: Place equivalent trades via CLOB API
-- 🛡️ **Risk controls**: Configurable limits and safeguards
-- 📊 **Flexible sizing**: Fixed USD, fixed shares, or proportional
-- 💾 **State persistence**: Never replay the same trade twice
-- 🔌 **Optional Redis**: File-based by default, Redis optional
-- 🧪 **Dry-run mode**: Test without real money
-- 📈 **Paper trading**: Simulate trades with virtual funds and track PnL
-- 💰 **Market resolution P&L**: Automatic settlement when prediction markets resolve
-- 📺 **Live stats mode**: Real-time monitoring with `--watch` flag
-- 🔀 **Trade aggregation**: Combines rapid-fire fills into single trades
-- 📋 **Activity types**: Tracks TRADE, SPLIT, MERGE, and REDEEM operations
-- 🏆 **Win/loss tracking**: See resolved market outcomes and win rate
+### 🎯 Core Copy Trading
+
+- **Real-time Trade Detection**: Monitor whale wallets and detect large orders within milliseconds
+- **Automated Trade Execution**: Automatically copy trades with configurable size and slippage settings
+- **Multiple Sizing Modes**:
+  - Fixed USD amount per trade
+  - Fixed shares/number of shares
+  - Proportional sizing (copy a percentage of the whale's position)
+- **Smart Position Management**: Track open positions and automatically handle exits
+
+### 👁️ Advanced Whale Monitoring
+
+- **Whale Trades Dashboard**: Real-time stream of large orders with market context
+- **Whale Profile Analytics**: Deep dive into individual trader stats including:
+  - Total P&L and win/loss statistics
+  - Trade history and performance metrics
+  - Portfolio composition and current positions
+  - Historical P&L charts with multiple timeframes
+- **Filter by Trade Size**: Configurable minimum trade size to focus on meaningful whale activity
+- **Price Impact Analysis**: See entry prices and market context for each trade
+
+### 💰 Portfolio & Risk Management
+
+- **Multi-Account Support**: Manage multiple trading accounts simultaneously
+- **Paper Trading**: Test strategies with simulated trades before risking real capital
+  - Configurable starting balance
+  - Realistic fee simulation
+  - Full position tracking
+- **Stop Loss & Take Profit**: Automatic exit rules with customizable thresholds
+- **Risk Controls**:
+  - Maximum position size limits
+  - Daily loss limits
+  - Exposure tracking across positions
+- **Live Balance Monitoring**: Real-time portfolio value and P&L tracking
+
+### 📊 Analytics & Performance
+
+- **Performance Dashboard**: Comprehensive stats including win rate, profit factor, largest wins/losses
+- **Trade History**: Searchable, filterable trade logs with detailed execution info
+- **P&L Visualization**: Charts showing portfolio performance over time
+- **Holdings Dashboard**: Current open positions with real-time valuations
+
+### 🛠️ User Interface
+
+- **Desktop Application**: Modern Electron + React desktop app with real-time updates
+- **CLI Interface**: Command-line tool for headless trading and automation
+- **Responsive Design**: Mobile-friendly responsive UI with Tailwind CSS
+- **Dark Theme**: Professional dark color scheme
+- **Live Data Sync**: WebSocket-based real-time data
+
+### ⚙️ Configuration & Customization
+
+- **Environment-Based Config**: Manage settings via .env file
+- **Strategy Customization**: Define custom trading rules and filters
+- **Account Management**: Secure handling of multiple exchange accounts
+- **Persistence**: All settings and state automatically saved
+
+---
+
+## Project Structure
+
+```
+polymarket-trading-bot/
+├── src/                          # CLI & Backend Logic
+│   ├── cli.ts                    # Command-line entry point
+│   ├── commands/                 # CLI command implementations
+│   │   ├── run.ts               # Run the copy trading bot
+│   │   ├── paper.ts             # Paper trading commands
+│   │   ├── config.ts            # Configuration management
+│   │   ├── status.ts            # Check bot status
+│   │   └── ...
+│   ├── config/                   # Configuration handling
+│   ├── copier/                   # Core copy trading logic
+│   │   ├── executor.ts          # Trade execution engine
+│   │   ├── watcher.ts           # Whale monitoring
+│   │   ├── paperTrading.ts      # Paper trading simulator
+│   │   ├── state.ts             # Position/trade state management
+│   │   └── risk.ts              # Risk management rules
+│   ├── polymarket/               # Polymarket API integration
+│   │   ├── clobClient.ts        # CLOB API wrapper
+│   │   ├── dataApi.ts           # Data API client
+│   │   ├── gammaApi.ts          # Gamma API client
+│   │   └── tokenResolver.ts     # Token/contract resolution
+│   ├── data/                     # Data persistence
+│   │   ├── fileProvider.ts      # File-based storage
+│   │   ├── redisProvider.ts     # Redis storage (optional)
+│   │   └── persistence.ts       # Persistence abstraction
+│   ├── utils/                    # Utility functions
+│   │   ├── logger.ts            # Logging utilities
+│   │   ├── dashboard.ts         # Terminal UI
+│   │   ├── http.ts              # HTTP client
+│   │   └── ...
+│   └── types/                    # TypeScript type definitions
+│
+├── client/                       # Desktop Application (Electron + Next.js)
+│   ├── main/                     # Main process (Electron)
+│   │   ├── background.ts        # Electron app entry & IPC handlers
+│   │   ├── botService.ts        # Bot service management
+│   │   ├── liveDataClient.ts    # Real-time data WebSocket
+│   │   ├── helpers/             # Helper utilities
+│   │   └── preload.ts           # Preload script for IPC
+│   │
+│   ├── renderer/                 # Renderer process (Next.js + React)
+│   │   ├── pages/               # Next.js pages
+│   │   │   ├── _app.tsx         # Root app component
+│   │   │   ├── home.tsx         # Dashboard page
+│   │   │   └── next.tsx         # Portfolio/Traders pages
+│   │   ├── components/          # React components
+│   │   │   ├── Tabs.tsx         # Main UI with all tabs
+│   │   │   └── NavBar.tsx       # Navigation bar
+│   │   ├── styles/              # CSS & Tailwind config
+│   │   ├── public/              # Static assets
+│   │   ├── types/               # TypeScript definitions
+│   │   ├── next.config.js       # Next.js configuration
+│   │   └── tailwind.config.js   # Tailwind CSS config
+│   │
+│   ├── app/                      # Built Electron app (generated)
+│   ├── dist/                     # Distribution build (generated)
+│   ├── resources/                # App resources (icons, etc)
+│   └── package.json              # Client dependencies
+│
+├── data/                         # Data directory (persistent)
+│   ├── config.json              # Saved configuration
+│   ├── accounts.json            # Account credentials
+│   ├── state.json               # Trading state
+│   ├── paper-state.json         # Paper trading state
+│   ├── live-balance.json        # Balance snapshots
+│   ├── token-cache.json         # Cached token data
+│   └── logs/                    # Log files
+│
+├── logs/                        # Application logs
+├── .env.example                 # Example environment configuration
+├── .gitignore                   # Git ignore rules
+├── package.json                 # Root dependencies
+├── tsconfig.json                # TypeScript configuration
+├── setup.sh / setup.bat         # Setup scripts
+├── dev.sh / dev.bat             # Development scripts
+└── README.md                    # This file
+```
+
+---
 
 ## Quick Start
 
-### 1. Prerequisites
+### Prerequisites
 
-- Node.js 18 or higher
-- A Polymarket account with funded wallet
-- Private key for your trading wallet
+- **Node.js** 18.0.0 or higher ([download](https://nodejs.org))
+- **npm** 8.0.0 or higher (comes with Node.js)
+- **Polymarket Account** with API credentials
+- **Optional: Redis** for distributed state management
 
-### 2. Installation
+### Step 1: Clone Repository
 
 ```bash
-# Clone or download the project
-cd polymarket-copy-trader
-
-# Install dependencies
-npm install
-
-# Build the project
-npm run build
+git clone https://github.com/yourusername/polymarket-trading-bot.git
+cd polymarket-trading-bot
 ```
 
-### 3. Configuration
+### Step 2: Run Setup Script
+
+**On Windows:**
 
 ```bash
-# Copy the example environment file
+setup.bat
+```
+
+**On macOS/Linux:**
+
+```bash
+bash setup.sh
+```
+
+This will:
+
+1. ✓ Check Node.js installation
+2. ✓ Install all dependencies
+3. ✓ Build TypeScript and Electron apps
+4. ✓ Create initial data directories
+
+### Step 3: Configure Environment
+
+```bash
 cp .env.example .env
-
-# Edit .env with your settings
-# IMPORTANT: Set your PRIVATE_KEY
+# Edit .env with your Polymarket API credentials
 ```
 
-### 4. Initialize
+### Step 4: Start the App
+
+**Desktop Application:**
 
 ```bash
-# Initialize with target wallets
-pmcopy init --targets 0xABC123...,0xDEF456... --mode fixed_usd --usd 10 --dry-run
-
-# Or initialize empty and add targets later
-pmcopy init
-pmcopy targets add 0xABC123...
+dev.bat    # Windows
+# or
+bash dev.sh  # macOS/Linux
+# Choose option 1 for Desktop App
 ```
 
-### 5. Run
+**CLI Bot:**
 
 ```bash
-# Test with dry-run mode first!
-pmcopy run --dry-run
-
-# When ready for live trading
-pmcopy run
-```
-
----
-
-## Installation Options
-
-### Global Installation
-
-```bash
-npm run build
-npm link
-
-# Now you can use 'pmcopy' anywhere
-pmcopy --help
-```
-
-### Development Mode
-
-```bash
-# Run without building
-npm run dev -- run --dry-run
-
-# Or use tsx directly
-npx tsx src/cli.ts run --dry-run
-```
-
----
-
-## CLI Commands
-
-### `pmcopy init`
-
-Initialize the copy trader configuration. All settings default to values from your `.env` file.
-
-```bash
-pmcopy init [options]
-
-Options:
-  -t, --targets <addresses>      Comma-separated wallet addresses to copy
-  -m, --mode <mode>              Sizing mode: fixed_usd, fixed_shares, proportional
-  -u, --usd <amount>             USD per trade (for fixed_usd mode)
-  -s, --shares <amount>          Shares per trade (for fixed_shares mode)
-  --multiplier <ratio>           Proportional multiplier (e.g., 0.25 for 25%)
-  --slippage <percent>           Slippage tolerance (e.g., 0.01 for 1%)
-  --max-usd-per-trade <amount>   Maximum USD per single trade
-  --max-usd-per-market <amount>  Maximum USD exposure per market
-  --max-daily-volume <amount>    Maximum daily USD trading volume
-  --poll-interval <ms>           Polling interval in milliseconds
-  -d, --dry-run                  Enable dry-run mode (default from .env)
-  --no-dry-run                   Enable live trading
-  -f, --force                    Force reinitialize
-```
-
-**Note:** All defaults come from your `.env` file. If not set in `.env`, sensible defaults are used.
-
-**Examples:**
-
-```bash
-# Initialize with defaults from .env
-pmcopy init --targets 0xabc123...
-
-# Initialize with custom settings (overrides .env)
-pmcopy init -t 0xabc...,0xdef... -m fixed_usd -u 25 --slippage 0.02
-
-# Initialize for proportional copying (10% of target size)
-pmcopy init -t 0xabc... -m proportional --multiplier 0.1
-
-# Initialize with custom risk limits
-pmcopy init -t 0xabc... --max-usd-per-trade 50 --max-daily-volume 500
-```
-
-### `pmcopy run`
-
-Start the copy trading bot with a live dashboard UI.
-
-```bash
-pmcopy run [options]
-
-Options:
-  -i, --interval <ms>  Polling interval in milliseconds
-  -d, --dry-run        Enable dry-run mode
-  --no-dry-run         Disable dry-run mode
-  -v, --verbose        Enable verbose logging
-  --no-dashboard       Disable the live dashboard UI
-```
-
-**Dashboard Features:**
-
-The live dashboard shows real-time stats including:
-
-- **Balance**: Current account balance with return percentage
-- **Positions Value**: Total value of open positions
-- **Open Positions**: Number of active positions
-- **Unrealized/Realized P&L**: Profit and loss tracking
-- **Total Trades**: Count of executed trades
-- **Win Rate**: Percentage of winning trades
-- **Activity Log**: Live feed of trades, skips, and errors
-
-**Examples:**
-
-```bash
-# Run with live dashboard (default)
-pmcopy run
-
-# Run in dry-run mode (recommended for testing)
-pmcopy run --dry-run
-
-# Run with faster polling
-pmcopy run --interval 2000
-
-# Run without dashboard (verbose console output)
-pmcopy run --verbose
-
-# Live trading (use with caution!)
-pmcopy run --no-dry-run
-```
-
-### `pmcopy status`
-
-Show current configuration and statistics.
-
-```bash
-pmcopy status [options]
-
-Options:
-  -j, --json  Output as JSON
-```
-
-### `pmcopy targets`
-
-Manage target wallets to copy.
-
-```bash
-# List all targets
-pmcopy targets list
-
-# Add a target
-pmcopy targets add 0x123...
-
-# Remove a target
-pmcopy targets remove 0x123...
-
-# Clear all targets
-pmcopy targets clear --force
-```
-
-### `pmcopy config`
-
-Manage configuration settings.
-
-```bash
-# Show all configuration
-pmcopy config get
-
-# Get specific value
-pmcopy config get trading.slippage
-
-# Set a value
-pmcopy config set trading.fixedUsdSize 25
-pmcopy config set risk.maxDailyUsdVolume 500
-
-# List available keys
-pmcopy config keys
-
-# Reset to defaults
-pmcopy config reset --force
-```
-
-### `pmcopy stats`
-
-View paper trading performance and PnL.
-
-```bash
-pmcopy stats [options]
-
-Options:
-  -j, --json              Output as JSON
-  -c, --csv               Export trades to CSV
-  -r, --reset             Reset paper trading account
-  -b, --balance <amount>  Starting balance for reset (default: 1000)
-  -s, --settle            Force settlement of resolved positions
-  -w, --watch             Live auto-refresh mode
-  -i, --interval <secs>   Refresh interval for watch mode (default: 10)
-```
-
-**Examples:**
-
-```bash
-# Show paper trading stats (requires PAPER_TRADING=true)
-pmcopy stats
-
-# Output as JSON
-pmcopy stats --json
-
-# Export trades to CSV
-pmcopy stats --csv
-
-# Reset paper trading account
-pmcopy stats --reset
-
-# Reset with custom starting balance
-pmcopy stats --reset --balance 500
-
-# Force settlement check for resolved markets
-pmcopy stats --settle
-
-# Live stats mode (auto-refresh every 10 seconds)
-pmcopy stats --watch
-
-# Live stats with custom refresh interval (30 seconds)
-pmcopy stats --watch --interval 30
+bash dev.sh  # Choose option 2
+# or
+npm run dev
 ```
 
 ---
@@ -303,301 +236,192 @@ pmcopy stats --watch --interval 30
 
 ### Environment Variables (.env)
 
-| Variable                 | Description                                         | Default                                       |
-| ------------------------ | --------------------------------------------------- | --------------------------------------------- |
-| `PRIVATE_KEY`            | Your wallet private key (required for live trading) | -                                             |
-| `CHAIN_ID`               | Network: 137 (Polygon) or 80001 (Mumbai)            | 137                                           |
-| `RPC_URL`                | Polygon RPC endpoint                                | https://polygon-rpc.com                       |
-| `CLOB_API_URL`           | Polymarket CLOB API (order execution)               | https://clob.polymarket.com                   |
-| `DATA_API_URL`           | Polymarket Data API (wallet activity)               | https://data-api.polymarket.com               |
-| `GAMMA_API_URL`          | Polymarket Gamma API (market metadata)              | https://gamma-api.polymarket.com              |
-| `WS_URL`                 | Real-time data WebSocket                            | wss://ws-subscriptions-clob.polymarket.com/ws |
-| `PAPER_TRADING`          | Enable paper trading with virtual funds             | false                                         |
-| `PAPER_STARTING_BALANCE` | Initial virtual balance                             | 1000                                          |
-| `PAPER_FEE_RATE`         | Simulated trading fee (0.001 = 0.1%)                | 0.001                                         |
-| `USE_REDIS`              | Use Redis for persistence                           | false                                         |
-| `REDIS_URL`              | Redis connection URL                                | redis://localhost:6379                        |
-| `DATA_DIR`               | Directory for JSON persistence                      | ./data                                        |
-| `LOG_LEVEL`              | Logging level                                       | info                                          |
-| `DRY_RUN`                | Default dry-run mode                                | true                                          |
+#### Polymarket API Credentials
 
-### Polymarket API Endpoints
+```env
+# Your Polymarket CLOB API credentials
+POLY_API_KEY=your_api_key
+POLY_API_SECRET=your_api_secret
+POLY_PASSPHRASE=your_passphrase
 
-| API         | URL                                           | Purpose                               |
-| ----------- | --------------------------------------------- | ------------------------------------- |
-| **CLOB**    | https://clob.polymarket.com                   | Order placement, balances, order book |
-| **Data**    | https://data-api.polymarket.com               | Wallet activity history, trade lookup |
-| **Gamma**   | https://gamma-api.polymarket.com              | Market metadata, resolution status    |
-| **RTDS WS** | wss://ws-subscriptions-clob.polymarket.com/ws | Real-time price updates, order fills  |
+# Your trading wallet address
+POLY_FUNDER_ADDRESS=0x...
 
-### Configuration Keys
-
-#### Trading
-
-| Key                              | Description                                 | Default   |
-| -------------------------------- | ------------------------------------------- | --------- |
-| `trading.sizingMode`             | `fixed_usd`, `fixed_shares`, `proportional` | fixed_usd |
-| `trading.fixedUsdSize`           | USD per trade                               | 10        |
-| `trading.fixedSharesSize`        | Shares per trade                            | 10        |
-| `trading.proportionalMultiplier` | Multiplier for proportional mode            | 0.25      |
-| `trading.slippage`               | Slippage tolerance (0.01 = 1%)              | 0.01      |
-
-#### Risk
-
-| Key                      | Description                   | Default |
-| ------------------------ | ----------------------------- | ------- |
-| `risk.maxUsdPerTrade`    | Maximum USD per single trade  | 100     |
-| `risk.maxUsdPerMarket`   | Maximum exposure per market   | 500     |
-| `risk.maxDailyUsdVolume` | Maximum daily trading volume  | 1000    |
-| `risk.dryRun`            | Dry-run mode (no real trades) | true    |
-| `risk.marketAllowlist`   | Only trade these markets      | []      |
-| `risk.marketDenylist`    | Never trade these markets     | []      |
-
-#### Polling
-
-| Key                  | Description              | Default |
-| -------------------- | ------------------------ | ------- |
-| `polling.intervalMs` | Polling interval         | 2500    |
-| `polling.tradeLimit` | Trades to fetch per poll | 20      |
-| `polling.maxRetries` | Max retries on error     | 3       |
-
----
-
-## Risk Controls
-
-### Built-in Safety Features
-
-1. **Dry-run mode** (enabled by default): Simulates trades without executing
-2. **Per-trade limit**: Maximum USD per single trade
-3. **Per-market limit**: Maximum exposure to any single market
-4. **Daily volume limit**: Maximum total trading volume per day
-5. **Trade deduplication**: Never copies the same trade twice
-6. **Market filtering**: Allowlist/denylist specific markets
-7. **Slippage protection**: Marketable limit orders with configurable slippage
-
-### Recommended Settings for Beginners
-
-```bash
-# Start with dry-run and small sizes
-pmcopy init --targets 0x... --mode fixed_usd --usd 5 --dry-run
-
-# Set conservative limits
-pmcopy config set risk.maxUsdPerTrade 20
-pmcopy config set risk.maxDailyUsdVolume 100
+# Signature type: 0=EOA, 1=Magic, 2=Safe
+POLY_SIGNATURE_TYPE=1
 ```
 
----
+#### Trading Strategy
 
-## Paper Trading
+```env
+# Polling interval (ms)
+POLL_INTERVAL_MS=500
 
-Paper trading lets you simulate trades with virtual funds to evaluate the profitability of your copy trading strategy before risking real money.
+# Sizing mode: fixed_usd | fixed_shares | proportional
+SIZING_MODE=proportional
 
-### Enabling Paper Trading
+# Default USD size per trade
+DEFAULT_USD_SIZE=10
 
-1. Set in your `.env` file:
+# Proportional multiplier (0-1)
+PROPORTIONAL_MULTIPLIER=0.25
 
-```bash
-# Disable dry-run (which only logs, doesn't simulate)
-DRY_RUN=false
+# Minimum order size in USD
+MIN_ORDER_SIZE=0.1
 
-# Enable paper trading with virtual funds
-PAPER_TRADING=true
+# Slippage tolerance
+SLIPPAGE_TOLERANCE=0.01
+```
 
-# Set your virtual starting balance
-PAPER_STARTING_BALANCE=1000
+#### Risk Management
 
-# Simulated fee rate (0.001 = 0.1%)
+```env
+# Maximum position size in USD
+MAX_POSITION_SIZE=1000
+
+# Daily loss limit in USD
+DAILY_LOSS_LIMIT=500
+
+# Profit taking threshold
+PROFIT_TARGET_PCT=10
+
+# Stop loss threshold
+STOP_LOSS_PCT=5
+```
+
+#### Paper Trading
+
+```env
+# Enable paper trading
+PAPER_TRADING=false
+
+# Starting virtual balance
+PAPER_STARTING_BALANCE=10000
+
+# Simulated fee rate
 PAPER_FEE_RATE=0.001
 ```
 
-2. Run the bot:
+---
+
+## Usage
+
+### Desktop Application
+
+Start and use all features from the UI:
+
+**[Insert dashboard screenshot here]**
+
+**Tabs:**
+
+- 📊 **Dashboard**: Portfolio overview and balance
+- 💰 **Portfolio**: Open and closed positions
+- 👥 **Traders**: Monitor trader activity
+- 🐋 **Whales**: Real-time whale trades with filtering
+- 📈 **Performance**: Trade history and analytics
+- ⚙️ **Settings**: Configure accounts and strategies
+
+### CLI Interface
 
 ```bash
-pmcopy run
+# Run the bot
+npm run dev -- run [options]
+
+# Manage accounts
+npm run dev -- config set|get|list
+
+# Check status
+npm run dev -- status
+
+# View statistics
+npm run dev -- stats
+
+# Paper trading
+npm run dev -- paper reset|stats|config
 ```
-
-### Viewing Performance
-
-```bash
-# See full performance stats
-pmcopy stats
-
-# Export trade history to CSV for analysis
-pmcopy stats --csv
-
-# Get JSON stats for programmatic use
-pmcopy stats --json
-```
-
-### Paper Trading Stats Include
-
-- **Account**: Starting balance, current balance, total return %
-- **PnL**: Realized PnL, unrealized PnL, total fees
-- **Trade Stats**: Win rate, total trades, largest win/loss
-- **Positions**: All open positions with current prices
-- **History**: Recent trades with PnL per trade
-- **Resolved Markets**: Automatic settlement with correct P&L calculation
-
-### Market Resolution & Settlement
-
-Polymarket is a prediction market where:
-
-- **Winning shares** pay out $1.00 each
-- **Losing shares** pay out $0.00 each
-
-When markets resolve, paper trading automatically:
-
-1. Detects resolution via the Gamma API (`outcomePrices` field)
-2. Determines if your position won or lost
-3. Calculates P&L: `(shares × settlementPrice) - costBasis`
-4. Updates your balance accordingly
-5. Tracks win rate and settlement history
-
-**Example**: You buy 100 YES shares at $0.65 ($65 total). If YES wins:
-
-- Settlement value: 100 × $1.00 = $100
-- P&L: $100 - $65 = **+$35 profit**
-
-If YES loses:
-
-- Settlement value: 100 × $0.00 = $0
-- P&L: $0 - $65 = **-$65 loss**
-
-### Live Stats Mode
-
-Monitor your paper trading performance in real-time:
-
-```bash
-# Auto-refresh every 10 seconds
-pmcopy stats --watch
-
-# Custom refresh interval (30 seconds)
-pmcopy stats --watch --interval 30
-
-# Press Ctrl+C to stop
-```
-
-Live stats automatically:
-
-- Update position prices from current market data
-- Settle any newly resolved positions
-- Recalculate unrealized P&L
-- Show real-time account value
-
-### Resetting Paper Account
-
-```bash
-# Reset with default starting balance ($1000)
-pmcopy stats --reset
-
-# Reset with custom balance
-pmcopy stats --reset --balance 500
-```
-
-### Mode Comparison
-
-| Mode                 | Real Orders | Tracks PnL | Use Case                             |
-| -------------------- | ----------- | ---------- | ------------------------------------ |
-| `DRY_RUN=true`       | No          | No         | Quick testing, see what would happen |
-| `PAPER_TRADING=true` | No          | Yes        | Evaluate strategy profitability      |
-| Both `false`         | **YES**     | Via chain  | **LIVE TRADING - Real money!**       |
 
 ---
 
-## How It Works
+## Desktop App Screenshots
 
-### Architecture
+### Dashboard
 
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Data API      │────▶│    Watcher      │────▶│    Executor     │
-│  (Polling)      │     │  (Detect Trades)│     │  (Place Orders) │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-                               │                        │
-                               ▼                        ▼
-                        ┌─────────────────┐     ┌─────────────────┐
-                        │  Risk Manager   │     │   CLOB Client   │
-                        │  (Validate)     │     │  (Execute)      │
-                        └─────────────────┘     └─────────────────┘
-                               │                        │
-                               ▼                        ▼
-                        ┌─────────────────┐     ┌─────────────────┐
-                        │  State Manager  │     │  Token Resolver │
-                        │  (Persist)      │     │  (Metadata)     │
-                        └─────────────────┘     └─────────────────┘
-```
+**[Insert screenshot showing portfolio value, current positions, live balance]**
 
-### Flow
+### Whale Trades
 
-1. **Polling**: Every 2.5 seconds, fetch recent activity for each target wallet
-2. **Detection**: Parse and normalize trades, splits, merges, and redemptions
-3. **Aggregation**: Combine rapid-fire trades within 5-second windows
-4. **Deduplication**: Skip activities that have been seen before
-5. **Risk Check**: Validate against all risk limits
-6. **Token Resolution**: Resolve market metadata if needed
-7. **Execution**: Place order via CLOB (or simulate in dry-run/paper trading)
-8. **Persistence**: Save state to prevent replay
+**[Insert screenshot showing real-time whale trades with Side/Size/Entry/Wallet columns]**
 
-### Activity Types
+### Whale Profile
 
-The bot detects and handles multiple activity types from target wallets:
+**[Insert screenshot showing trader stats, P&L chart, recent activity]**
 
-| Type     | Description                            | Action                         |
-| -------- | -------------------------------------- | ------------------------------ |
-| `TRADE`  | Standard buy/sell order                | Copy the trade                 |
-| `SPLIT`  | USDC split into YES + NO positions     | Buy both outcomes              |
-| `MERGE`  | YES + NO positions merged back to USDC | Sell both outcomes             |
-| `REDEEM` | Winning shares redeemed for $1         | Auto-settled (market resolved) |
+### Performance
 
-### Trade Aggregation
+**[Insert screenshot showing trade history, performance metrics, P&L visualization]**
 
-When target wallets execute multiple trades rapidly (common with large orders that fill across multiple price levels), the bot aggregates them:
+### Settings
 
-- **5-second window**: Trades on the same market within 5 seconds are combined
-- **Prevents over-trading**: Instead of copying 10 small fills, copies 1 aggregated trade
-- **Accurate sizing**: Total shares and USD amounts are summed correctly
-
-Example: Target buys 1000 shares filled as 100+200+300+400 in 2 seconds
-→ Bot copies as single 1000-share trade
-
-### Sizing Modes
-
-| Mode           | Description                                            |
-| -------------- | ------------------------------------------------------ |
-| `fixed_usd`    | Always trade the same USD amount (e.g., $10 per trade) |
-| `fixed_shares` | Always trade the same number of shares                 |
-| `proportional` | Trade a percentage of the target's size (e.g., 25%)    |
-
-### Order Types
-
-Orders are placed as "marketable limit orders":
-
-- **BUY**: Limit price = target price × (1 + slippage)
-- **SELL**: Limit price = target price × (1 - slippage)
-
-This allows orders to fill immediately while protecting against excessive slippage.
+**[Insert screenshot showing configuration options]**
 
 ---
 
-## Persistence
+## Advanced Features
 
-### File-based (Default)
+### Paper Trading
 
-Data is stored in `./data/`:
+Test strategies without real capital:
 
-- `config.json` - Configuration settings
-- `state.json` - Seen trade IDs, daily volume, exposure
-- `token-cache.json` - Market metadata cache
+1. Enable in Settings and set starting balance
+2. Run normally - all trades execute in simulation
+3. Review metrics in Performance tab
+4. Reset to start fresh
 
-### Redis (Optional)
+Paper trading automatically:
 
-Enable Redis for distributed deployments:
+- Simulates fills at market prices
+- Tracks P&L with realistic fees
+- Settles resolved positions at $1/$0
+- Maintains full trade history
 
-```bash
-# .env
-USE_REDIS=true
-REDIS_URL=redis://localhost:6379
-```
+### Risk Management
+
+Built-in safety features:
+
+- **Position Size Limits**: Cap individual positions
+- **Daily Loss Limits**: Stop trading after threshold
+- **Stop Loss Orders**: Auto-exit at loss percentage
+- **Take Profit**: Auto-exit at profit target
+- **Exposure Monitoring**: Track total market exposure
+
+### Multi-Account Support
+
+Trade from multiple accounts simultaneously:
+
+1. Add accounts in Settings → Accounts
+2. Configure per-account settings
+3. Monitor all from unified dashboard
+4. Enable/disable accounts individually
+
+### Whale Filtering
+
+Filter whale trades by:
+
+- **Minimum size**: Focus on meaningful activity
+- **Market category**: Specific prediction markets
+- **Trader stats**: Filter by performance
+- **Time-based**: Peak trading hours only
+
+---
+
+## Performance Optimization
+
+For high-frequency trading:
+
+1. **Reduce polling interval**: Faster detection (watch API limits)
+2. **Use Redis**: Distributed state for multiple instances
+3. **WebSocket mode**: Real-time updates instead of polling
+4. **Account parallelization**: Trade from multiple accounts
 
 ---
 
@@ -605,149 +429,139 @@ REDIS_URL=redis://localhost:6379
 
 ### Common Issues
 
-#### "No targets configured"
+**"API credentials not valid"**
 
-```bash
-# Add target wallets
-pmcopy targets add 0xABC123...
-```
+- Verify credentials in .env
+- Check permissions on API key
+- Ensure environment variables are loaded
 
-#### "PRIVATE_KEY is required for live trading"
+**"Can't connect to Polymarket"**
 
-Edit your `.env` file and add your private key:
+- Check internet connection
+- Verify API endpoints are accessible
+- Check firewall/proxy settings
 
-```
-PRIVATE_KEY=your64characterhexstringwithout0x
-```
+**"Insufficient balance"**
 
-#### "Rate limited, backing off"
+- Ensure account has enough USDC
+- Check position sizing settings
+- Review pending orders
 
-The bot will automatically retry with exponential backoff. If persistent:
+**"High latency / slow trades"**
 
-- Increase polling interval: `pmcopy config set polling.intervalMs 5000`
-- Reduce number of targets
-
-#### "Could not resolve token ID"
-
-The market metadata couldn't be fetched. This can happen for:
-
-- Very new markets
-- Resolved/closed markets
-
-The trade will be skipped automatically.
+- Reduce POLL_INTERVAL_MS
+- Check internet speed
+- Close bandwidth-heavy applications
+- Consider WebSocket mode
 
 ### Debug Mode
 
-Enable verbose logging:
+Enable detailed logging:
 
 ```bash
-# In .env
-LOG_LEVEL=debug
-
-# Or via CLI
-pmcopy run --verbose
+export LOG_LEVEL=debug
+npm run dev
 ```
 
-### View Logs
-
-Logs are written to `./data/logs/pmcopy.log` by default.
-
-```bash
-# Follow logs
-tail -f data/logs/pmcopy.log
-```
-
----
-
-## Security Best Practices
-
-1. **Never share your private key**
-2. **Use a dedicated wallet** with limited funds for copy trading
-3. **Start with dry-run mode** to validate behavior
-4. **Set conservative limits** initially
-5. **Monitor the bot** regularly
-6. **Keep your .env file secure** (it's gitignored by default)
-
----
-
-## Project Structure
-
-```
-polymarket-copy-trader/
-├── src/
-│   ├── cli.ts                 # CLI entry point
-│   ├── commands/              # CLI commands
-│   │   ├── init.ts
-│   │   ├── run.ts
-│   │   ├── status.ts
-│   │   ├── stats.ts           # Paper trading stats (--watch, --settle)
-│   │   ├── targets.ts
-│   │   └── config.ts
-│   ├── config/                # Configuration management
-│   │   ├── index.ts
-│   │   └── env.ts
-│   ├── data/                  # Persistence layer
-│   │   ├── persistence.ts
-│   │   ├── fileProvider.ts
-│   │   └── redisProvider.ts
-│   ├── polymarket/            # Polymarket API clients
-│   │   ├── clobClient.ts      # CLOB API for order execution
-│   │   ├── dataApi.ts         # Data API for wallet activity
-│   │   ├── gammaApi.ts        # Gamma API for market metadata & resolution
-│   │   └── tokenResolver.ts   # Token ID resolution
-│   ├── copier/                # Core copy trading logic
-│   │   ├── types.ts           # Type definitions
-│   │   ├── watcher.ts         # Trade detection & aggregation
-│   │   ├── executor.ts        # Trade execution
-│   │   ├── paperTrading.ts    # Paper trading simulation
-│   │   ├── risk.ts            # Risk management
-│   │   └── state.ts           # State management
-│   └── utils/                 # Utilities
-│       ├── http.ts
-│       └── logger.ts
-├── data/                      # Runtime data (gitignored)
-├── package.json
-├── tsconfig.json
-├── .env.example
-├── .gitignore
-└── README.md
-```
+Check logs in `data/logs/pmcopy.log`
 
 ---
 
 ## Development
 
+### Setup Development Environment
+
 ```bash
 # Install dependencies
 npm install
+cd client && npm install && cd ..
 
-# Run in development mode
-npm run dev -- --help
+# Start in development mode
+npm run dev
 
 # Build for production
 npm run build
-
-# Type checking
-npm run typecheck
 ```
+
+### Technology Stack
+
+- **Backend**: TypeScript, Node.js
+- **Desktop UI**: Electron, Next.js, React 18
+- **Styling**: Tailwind CSS with Container Queries
+- **State**: React Hooks, Electron Store
+- **Data**: JSON files, optional Redis
+- **APIs**: Polymarket CLOB, Data API, Real-time client
+- **Charts**: Lightweight Charts
+
+### Code Organization
+
+- **CLI Commands**: `src/commands/`
+- **Core Logic**: `src/copier/`
+- **API Integration**: `src/polymarket/`
+- **UI Components**: `client/renderer/components/`
+- **Electron IPC**: `client/main/background.ts`
+
+---
+
+## Security Best Practices
+
+1. **Never share your private key or API credentials**
+2. **Use a dedicated wallet** with limited funds
+3. **Start with paper trading** before live trading
+4. **Set conservative limits** initially
+5. **Monitor regularly** and never leave unattended
+6. **Keep .env secure** (it's gitignored by default)
+7. **Review all transactions** before confirming
+
+---
+
+## Contributing
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+Ensure:
+
+- Code is properly typed with TypeScript
+- Changes are tested
+- No API keys are committed
+- Commit messages are clear
+
+---
+
+## Support & Contact
+
+- 📧 Email: support@example.com
+- 💬 Discord: [Join our Discord](https://discord.gg/example)
+- 🐛 Issues: [GitHub Issues](https://github.com/yourusername/polymarket-trading-bot/issues)
+- 📚 Docs: [Full Documentation](https://docs.example.com)
+
+---
+
+## Changelog
+
+### v1.0.0
+
+- ✅ Initial release
+- ✅ Desktop application with real-time monitoring
+- ✅ Whale trades detection and filtering
+- ✅ Paper trading with full position tracking
+- ✅ Multi-account support
+- ✅ Advanced analytics and performance tracking
+- ✅ Risk management tools
+- ✅ CLI interface for headless trading
 
 ---
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-## Support
-
-This is open-source software provided without warranty. For issues:
-
-1. Check the troubleshooting section
-2. Review your configuration
-3. Enable debug logging
-4. Check the Polymarket API status
-
----
-
-**Remember: Always test with dry-run mode first, and never trade more than you can afford to lose.**
+Made with ❤️ for the Polymarket community

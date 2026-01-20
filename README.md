@@ -25,6 +25,19 @@ JOIN DISCORD: https://discord.gg/ZX5nJzWdVG
 
 ---
 
+## 📚 Full Documentation
+
+For detailed instructions, please visit the [Documentation Folder](./docs/):
+
+- **[Installation Guide](./docs/installation.md)**: Step-by-step setup instructions.
+- **[User Manual](./docs/user-guide.md)**: How to use the Dashboard, Whales tab, and Settings.
+- **[Configuration](./docs/configuration.md)**: Advanced configuration and environment variables.
+- **[Paper Trading](./docs/paper-trading.md)**: Learn how to test without real money.
+- **[Troubleshooting](./docs/troubleshooting.md)**: Solutions to common issues.
+- **[Architecture](./docs/architecture.md)**: For developers.
+
+---
+
 ## Features
 
 ### 🎯 Core Copy Trading
@@ -542,10 +555,9 @@ Ensure:
 
 ## Support & Contact
 
-- 📧 Email: support@example.com
-- 💬 Discord: [Join our Discord](https://discord.gg/example)
-- 🐛 Issues: [GitHub Issues](https://github.com/yourusername/polymarket-trading-bot/issues)
-- 📚 Docs: [Full Documentation](https://docs.example.com)
+- 💬 Discord: [Join our Discord](https://discord.gg/ZX5nJzWdVG)
+- 🐛 Issues: [GitHub Issues](https://github.com/TONKAFREAK/polymarket-trading-bot/issues)
+- 📚 Docs: [Full Documentation](./docs/)
 
 ---
 

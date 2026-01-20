@@ -4,6 +4,8 @@ A professional-grade copy trading platform for Polymarket prediction markets. Mo
 
 ![Screenshot](hero.png)
 
+JOIN DISCORD: https://discord.gg/ZX5nJzWdVG
+
 ---
 
 ## ⚠️ IMPORTANT DISCLAIMER

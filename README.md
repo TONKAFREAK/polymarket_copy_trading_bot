@@ -194,7 +194,7 @@ polymarket-trading-bot/
 ### Step 1: Clone Repository
 
 ```bash
-git clone https://github.com/yourusername/polymarket-trading-bot.git
+git clone https://github.com/TONKAFREAK/polymarket_copy_trading_bot.git
 cd polymarket-trading-bot
 ```
 
@@ -321,12 +321,6 @@ PAPER_FEE_RATE=0.001
 
 ## Usage
 
-### Desktop Application
-
-Start and use all features from the UI:
-
-**[Insert dashboard screenshot here]**
-
 **Tabs:**
 
 - 📊 **Dashboard**: Portfolio overview and balance
@@ -340,19 +334,19 @@ Start and use all features from the UI:
 
 ```bash
 # Run the bot
-npm run dev -- run [options]
+npm run dev --run [options]
 
 # Manage accounts
-npm run dev -- config set|get|list
+npm run dev --config set|get|list
 
 # Check status
-npm run dev -- status
+npm run dev --status
 
 # View statistics
-npm run dev -- stats
+npm run dev --stats
 
 # Paper trading
-npm run dev -- paper reset|stats|config
+npm run dev --paper reset|stats|config
 ```
 
 ---

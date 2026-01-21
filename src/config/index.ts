@@ -467,7 +467,7 @@ let configManagerInstance: ConfigManager | null = null;
 export function getConfigManager(dataDir?: string): ConfigManager {
   if (!configManagerInstance) {
     configManagerInstance = new ConfigManager(
-      dataDir || process.env.DATA_DIR || "./data"
+      dataDir || process.env.DATA_DIR || "./data",
     );
   }
   return configManagerInstance;

@@ -1770,6 +1770,124 @@ ipcMain.handle(
   },
 );
 
+// Redeem a resolved position (LIVE mode only)
+ipcMain.handle(
+  "position:redeem",
+  async (_event, data: { tokenId: string; conditionId?: string }) => {
+    const { tokenId, conditionId } = data;
+    // Determine mode from accounts state
+    const accountsState = loadAccountsState();
+    const mode = accountsState.activeAccountId ? "live" : "paper";
+
+    console.log(
+      `[position:redeem] Mode: ${mode}, tokenId: ${tokenId}, conditionId: ${conditionId}`,
+    );
+
+    // ============ LIVE MODE ============
+    if (mode === "live") {
+      try {
+        if (!botService) {
+          return { success: false, error: "Bot service not initialized" };
+        }
+
+        const clobClient = (botService as any).clobClient;
+        if (!clobClient) {
+          return { success: false, error: "CLOB client not available" };
+        }
+
+        // Need condition ID to redeem
+        if (!conditionId) {
+          return {
+            success: false,
+            error: "Condition ID required for redemption",
+          };
+        }
+
+        // Call the redeem method
+        const result = await clobClient.redeemPosition(conditionId);
+
+        if (result.success) {
+          console.log(`[position:redeem] SUCCESS: txHash=${result.txHash}`);
+
+          // Add log entry
+          addLog({
+            id: `log-${Date.now()}`,
+            timestamp: Date.now(),
+            type: "redeem",
+            marketName: tokenId.substring(0, 20) + "...",
+            message: `[LIVE] Redeemed position: ${result.txHash}`,
+          });
+
+          return {
+            success: true,
+            txHash: result.txHash,
+            mode: "live",
+          };
+        } else {
+          console.error(`[position:redeem] FAILED: ${result.error}`);
+          return { success: false, error: result.error };
+        }
+      } catch (e: any) {
+        console.error(`[position:redeem] ERROR: ${e.message}`);
+        return { success: false, error: e.message };
+      }
+    }
+
+    // ============ PAPER MODE ============
+    // For paper mode, just mark position as redeemed
+    const paperState = readJsonFile("paper-state.json", {
+      positions: {},
+      trades: [],
+      currentBalance: 10000,
+      stats: {},
+    });
+
+    const position = paperState.positions[tokenId];
+    if (!position) {
+      return { success: false, error: "Position not found" };
+    }
+
+    // Simulate redemption - assume winning at current value
+    const redeemValue =
+      position.currentValue || position.shares * position.currentPrice;
+    const pnl = redeemValue - (position.totalCost || 0);
+
+    // Update balance
+    paperState.currentBalance =
+      (paperState.currentBalance || 10000) + redeemValue;
+
+    // Mark position as redeemed
+    position.shares = 0;
+    position.settled = true;
+    position.isResolved = true;
+    position.settlementPnl = pnl;
+
+    // Update stats
+    if (!paperState.stats) paperState.stats = {};
+    paperState.stats.totalRealizedPnl =
+      (paperState.stats.totalRealizedPnl || 0) + pnl;
+
+    writeJsonFile("paper-state.json", paperState);
+
+    addLog({
+      id: `log-${Date.now()}`,
+      timestamp: Date.now(),
+      type: "redeem",
+      marketName: position.marketSlug,
+      outcome: position.outcome,
+      total: redeemValue,
+      message: `[PAPER] Redeemed ${position.shares?.toFixed(2) || 0} shares for $${redeemValue.toFixed(2)}`,
+    });
+
+    return {
+      success: true,
+      redeemValue,
+      pnl,
+      mode: "paper",
+    };
+  },
+);
+
 // Get activity logs
 ipcMain.handle("logs:get", async () => {
   // Read from recent logs if they exist

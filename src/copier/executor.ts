@@ -33,7 +33,7 @@ export class Executor {
     tradingConfig: TradingConfig,
     riskManager: RiskManager,
     riskConfig: RiskConfig,
-    tokenResolver?: TokenResolver
+    tokenResolver?: TokenResolver,
   ) {
     this.tradingConfig = tradingConfig;
     this.riskConfig = riskConfig;
@@ -56,7 +56,7 @@ export class Executor {
     if (this.paperTradingEnabled) {
       this.paperTradingManager = getPaperTradingManager(
         envConfig.dataDir,
-        envConfig.paperStartingBalance
+        envConfig.paperStartingBalance,
       );
       logger.info("Paper trading enabled", {
         startingBalance: envConfig.paperStartingBalance,
@@ -125,7 +125,7 @@ export class Executor {
       logOrderSkipped(
         logger,
         signal.tradeId,
-        riskCheck.reason || "Risk check failed"
+        riskCheck.reason || "Risk check failed",
       );
       return {
         signal,
@@ -170,7 +170,7 @@ export class Executor {
     } else if (this.paperTradingEnabled && this.paperTradingManager) {
       result = await this.paperTradingManager.executePaperTrade(
         signal,
-        orderRequest
+        orderRequest,
       );
     } else {
       result = await this.placeOrder(orderRequest);
@@ -183,7 +183,7 @@ export class Executor {
       signal.side,
       limitPrice,
       size,
-      this.riskConfig.dryRun
+      this.riskConfig.dryRun,
     );
 
     return {
@@ -278,7 +278,7 @@ export class Executor {
    */
   private calculateLimitPrice(
     targetPrice: number,
-    side: "BUY" | "SELL"
+    side: "BUY" | "SELL",
   ): number {
     let limitPrice: number;
 
@@ -345,7 +345,7 @@ export class Executor {
    */
   private async handleRedeem(
     signal: TradeSignal,
-    timestamp: number
+    timestamp: number,
   ): Promise<ExecutionResult> {
     // Fetch market info to get the proper market name and conditionId
     const { getGammaApiClient } = await import("../polymarket/gammaApi");
@@ -360,7 +360,7 @@ export class Executor {
         const marketInfo = await gammaApi.getMarketByTokenId(signal.tokenId);
         if (marketInfo) {
           marketName = String(
-            marketInfo.question || marketInfo.title || marketName
+            marketInfo.question || marketInfo.title || marketName,
           );
           conditionId = conditionId || marketInfo.conditionId;
         }
@@ -434,13 +434,13 @@ export class Executor {
         // Get our positions and find ones matching this conditionId OR market name
         const { positions } = await this.getPositions();
         let matchingPositions = positions.filter(
-          (pos) => pos.conditionId === targetConditionId && pos.shares > 0
+          (pos) => pos.conditionId === targetConditionId && pos.shares > 0,
         );
 
         // Fallback: if no positions match by conditionId, try matching by market name
         if (matchingPositions.length === 0) {
           matchingPositions = positions.filter(
-            (pos) => pos.market === marketName && pos.shares > 0
+            (pos) => pos.market === marketName && pos.shares > 0,
           );
           if (matchingPositions.length > 0) {
             logger.info("REDEEM: Matched positions by market name fallback", {
@@ -572,7 +572,7 @@ export class Executor {
    */
   private async handleMerge(
     signal: TradeSignal,
-    timestamp: number
+    timestamp: number,
   ): Promise<ExecutionResult> {
     // Fetch market info to get the proper market name and conditionId
     const { getGammaApiClient } = await import("../polymarket/gammaApi");
@@ -587,7 +587,7 @@ export class Executor {
         const marketInfo = await gammaApi.getMarketByTokenId(signal.tokenId);
         if (marketInfo) {
           marketName = String(
-            marketInfo.question || marketInfo.title || marketName
+            marketInfo.question || marketInfo.title || marketName,
           );
           conditionId = conditionId || marketInfo.conditionId;
         }
@@ -602,7 +602,7 @@ export class Executor {
         const marketInfo = await gammaApi.getMarketBySlug(signal.marketSlug);
         if (marketInfo) {
           marketName = String(
-            marketInfo.question || marketInfo.title || marketName
+            marketInfo.question || marketInfo.title || marketName,
           );
           conditionId = marketInfo.conditionId;
         }
@@ -627,7 +627,8 @@ export class Executor {
       for (const [tokenId, pos] of Object.entries(positions)) {
         // Match by marketSlug
         const posSlugLower = pos.marketSlug?.toLowerCase() || "";
-        const isMatch = marketSlugLower && posSlugLower.includes(marketSlugLower);
+        const isMatch =
+          marketSlugLower && posSlugLower.includes(marketSlugLower);
 
         if (isMatch && pos.shares > 0 && !pos.settled) {
           // Simulate selling the position
@@ -640,11 +641,13 @@ export class Executor {
               price: currentPrice,
               size: pos.shares,
               type: "GTC",
-            }
+            },
           );
           if (sellResult.success) {
             soldCount++;
-            totalValue += (sellResult.executedPrice || currentPrice) * (sellResult.executedSize || pos.shares);
+            totalValue +=
+              (sellResult.executedPrice || currentPrice) *
+              (sellResult.executedSize || pos.shares);
           }
         }
       }
@@ -697,16 +700,18 @@ export class Executor {
 
         // Find positions in this market
         let matchingPositions = positions.filter(
-          (pos) => pos.conditionId === conditionId && pos.shares > 0.01
+          (pos) => pos.conditionId === conditionId && pos.shares > 0.01,
         );
 
         // Fallback: match by market slug/name
         if (matchingPositions.length === 0 && signal.marketSlug) {
           matchingPositions = positions.filter(
             (pos) =>
-              (pos.market?.toLowerCase().includes(signal.marketSlug!.toLowerCase()) ||
+              (pos.market
+                ?.toLowerCase()
+                .includes(signal.marketSlug!.toLowerCase()) ||
                 pos.conditionId?.includes(signal.marketSlug!)) &&
-              pos.shares > 0.01
+              pos.shares > 0.01,
           );
         }
 
@@ -841,7 +846,7 @@ export class Executor {
         orderRequest.side,
         orderRequest.price,
         orderRequest.size,
-        this.tradingConfig.slippage
+        this.tradingConfig.slippage,
       );
     } catch (error) {
       return {
@@ -1054,7 +1059,7 @@ export class Executor {
         "Failed to get positions from Data API, falling back to CLOB",
         {
           error: (error as Error).message,
-        }
+        },
       );
       // Fallback to CLOB client
       if (this.clobClient) {
@@ -1083,7 +1088,7 @@ export class Executor {
 export function createExecutor(
   tradingConfig: TradingConfig,
   riskConfig: RiskConfig,
-  riskManager: RiskManager
+  riskManager: RiskManager,
 ): Executor {
   return new Executor(tradingConfig, riskManager, riskConfig);
 }

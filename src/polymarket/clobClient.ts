@@ -52,8 +52,95 @@ export class ClobClientWrapper {
   > = new Map();
   private readonly CACHE_TTL_MS = 60000; // 1 minute cache
 
+  // Pending balance tracking to prevent concurrent orders exceeding balance
+  private pendingOrderValue: number = 0;
+  private lastKnownBalance: number = 0;
+  private lastBalanceFetchTime: number = 0;
+  private readonly BALANCE_CACHE_MS = 5000; // Cache balance for 5 seconds
+
+  // Sequential order processing to avoid race conditions
+  private orderQueuePromise: Promise<void> = Promise.resolve();
+  private lastBalanceInsufficientTime: number = 0;
+  private readonly BALANCE_COOLDOWN_MS = 10000; // Wait 10s after balance error
+
   constructor(config: ClobClientConfig) {
     this.config = config;
+  }
+
+  /**
+   * Get available balance considering pending orders
+   */
+  private getAvailableBalance(): number {
+    return Math.max(0, this.lastKnownBalance - this.pendingOrderValue);
+  }
+
+  /**
+   * Reserve balance for a pending order
+   */
+  private reserveBalance(amount: number): void {
+    this.pendingOrderValue += amount;
+    logger.debug("Balance reserved for order", {
+      amount: amount.toFixed(2),
+      pendingTotal: this.pendingOrderValue.toFixed(2),
+      available: this.getAvailableBalance().toFixed(2),
+    });
+  }
+
+  /**
+   * Release reserved balance (on order completion or failure)
+   */
+  private releaseBalance(amount: number): void {
+    this.pendingOrderValue = Math.max(0, this.pendingOrderValue - amount);
+    logger.debug("Balance released", {
+      amount: amount.toFixed(2),
+      pendingTotal: this.pendingOrderValue.toFixed(2),
+    });
+  }
+
+  /**
+   * Check if we're in balance cooldown (after insufficient balance error)
+   */
+  private isInBalanceCooldown(): boolean {
+    return (
+      Date.now() - this.lastBalanceInsufficientTime < this.BALANCE_COOLDOWN_MS
+    );
+  }
+
+  /**
+   * Reset balance tracking state
+   * Call this after manual balance changes or to clear cooldown
+   */
+  resetBalanceTracking(): void {
+    this.pendingOrderValue = 0;
+    this.lastKnownBalance = 0;
+    this.lastBalanceFetchTime = 0;
+    this.lastBalanceInsufficientTime = 0;
+    logger.info("Balance tracking state reset");
+  }
+
+  /**
+   * Get current balance tracking state for debugging
+   */
+  getBalanceTrackingState(): {
+    lastKnownBalance: number;
+    pendingOrderValue: number;
+    availableBalance: number;
+    inCooldown: boolean;
+    cooldownRemaining: number;
+  } {
+    return {
+      lastKnownBalance: this.lastKnownBalance,
+      pendingOrderValue: this.pendingOrderValue,
+      availableBalance: this.getAvailableBalance(),
+      inCooldown: this.isInBalanceCooldown(),
+      cooldownRemaining: this.isInBalanceCooldown()
+        ? Math.ceil(
+            (this.BALANCE_COOLDOWN_MS -
+              (Date.now() - this.lastBalanceInsufficientTime)) /
+              1000,
+          )
+        : 0,
+    };
   }
 
   /**
@@ -74,7 +161,7 @@ export class ClobClientWrapper {
 
     // Create wallet from private key
     const provider = new ethers.providers.JsonRpcProvider(
-      this.config.rpcUrl || chainConfig.rpcUrl
+      this.config.rpcUrl || chainConfig.rpcUrl,
     );
 
     // Ensure private key has 0x prefix
@@ -100,7 +187,7 @@ export class ClobClientWrapper {
     if (!hasBuilderCreds) {
       throw new Error(
         "Builder API credentials required. Set POLY_API_KEY, POLY_API_SECRET, and POLY_PASSPHRASE in .env. " +
-          "Get these from https://builders.polymarket.com/"
+          "Get these from https://builders.polymarket.com/",
       );
     }
 
@@ -122,7 +209,7 @@ export class ClobClientWrapper {
     const tempClient = new ClobClient(
       clobUrl,
       this.config.chainId,
-      this.wallet
+      this.wallet,
     );
 
     let userCreds;
@@ -135,7 +222,7 @@ export class ClobClientWrapper {
       });
       throw new Error(
         "Failed to derive API credentials. Make sure your wallet has been used on Polymarket. " +
-          "Visit https://polymarket.com and make at least one trade first."
+          "Visit https://polymarket.com and make at least one trade first.",
       );
     }
 
@@ -161,7 +248,7 @@ export class ClobClientWrapper {
       funderAddress, // Polymarket profile address for Magic/Email login
       undefined, // options
       false, // useServerTime
-      builderConfig
+      builderConfig,
     );
 
     logger.info("CLOB client initialized with Builder attribution");
@@ -182,15 +269,65 @@ export class ClobClientWrapper {
    * Place an order on the CLOB
    * Uses the current Polymarket API format with tickSize and negRisk
    * Includes pre-flight balance check and minimum order validation
+   * Orders are processed sequentially to prevent race conditions
    */
   async placeOrder(request: OrderRequest): Promise<OrderResult> {
+    // Queue this order to ensure sequential processing
+    const result = await this.queueOrder(request);
+    return result;
+  }
+
+  /**
+   * Internal method to queue and process orders sequentially
+   */
+  private async queueOrder(request: OrderRequest): Promise<OrderResult> {
+    // Wait for any pending orders to complete
+    const previousPromise = this.orderQueuePromise;
+    let resolve: (value: OrderResult) => void;
+
+    this.orderQueuePromise = new Promise<void>((res) => {
+      resolve = (result: OrderResult) => {
+        res();
+        return result;
+      };
+    });
+
+    await previousPromise;
+
+    // Now process this order
+    const result = await this.processOrder(request);
+    resolve!(result);
+    return result;
+  }
+
+  /**
+   * Internal method to actually process an order
+   */
+  private async processOrder(request: OrderRequest): Promise<OrderResult> {
     if (!this.client || !this.wallet) {
       throw new Error("Client not initialized. Call initialize() first.");
     }
 
+    // Check if we're in balance cooldown (recent insufficient balance error)
+    if (request.side === "BUY" && this.isInBalanceCooldown()) {
+      logger.debug("Skipping order due to balance cooldown", {
+        orderValue: (request.price * request.size).toFixed(2),
+        cooldownRemaining: Math.ceil(
+          (this.BALANCE_COOLDOWN_MS -
+            (Date.now() - this.lastBalanceInsufficientTime)) /
+            1000,
+        ),
+      });
+      return {
+        success: false,
+        errorMessage:
+          "Temporarily paused - insufficient balance detected recently",
+      };
+    }
+
     // Validate minimum order size (Polymarket minimum is typically $1 or 1 share)
     const orderValue = request.price * request.size;
-    const MIN_ORDER_VALUE_USD = 0.50; // Minimum $0.50 order
+    const MIN_ORDER_VALUE_USD = 0.5; // Minimum $0.50 order
     const MIN_ORDER_SHARES = 0.1; // Minimum 0.1 shares
 
     if (orderValue < MIN_ORDER_VALUE_USD) {
@@ -215,22 +352,31 @@ export class ClobClientWrapper {
       };
     }
 
-    // Pre-flight balance check for BUY orders
+    // Pre-flight balance check for BUY orders (with pending order tracking)
+    const requiredUsdc = orderValue * 1.01; // Add 1% buffer for fees
+
     if (request.side === "BUY") {
       try {
-        const balances = await this.getBalances();
-        const availableUsdc = parseFloat(balances.usdc) || 0;
-        const requiredUsdc = orderValue * 1.01; // Add 1% buffer for fees
+        // Fetch balance if cache is stale
+        const now = Date.now();
+        if (now - this.lastBalanceFetchTime > this.BALANCE_CACHE_MS) {
+          const balances = await this.getBalances();
+          this.lastKnownBalance = parseFloat(balances.usdc) || 0;
+          this.lastBalanceFetchTime = now;
+        }
 
-        if (availableUsdc < requiredUsdc) {
-          logger.warn("Insufficient balance for order", {
-            available: availableUsdc.toFixed(2),
+        const availableBalance = this.getAvailableBalance();
+
+        if (availableBalance < requiredUsdc) {
+          logger.warn("Insufficient available balance for order", {
+            lastKnownBalance: this.lastKnownBalance.toFixed(2),
+            pendingOrders: this.pendingOrderValue.toFixed(2),
+            available: availableBalance.toFixed(2),
             required: requiredUsdc.toFixed(2),
-            orderValue: orderValue.toFixed(2),
           });
           return {
             success: false,
-            errorMessage: `Insufficient balance: have $${availableUsdc.toFixed(2)}, need $${requiredUsdc.toFixed(2)}`,
+            errorMessage: `Insufficient balance: have $${availableBalance.toFixed(2)} available, need $${requiredUsdc.toFixed(2)}`,
           };
         }
       } catch (balanceError) {
@@ -263,6 +409,11 @@ export class ClobClientWrapper {
           error: (shareError as Error).message,
         });
       }
+    }
+
+    // Reserve balance for this order (for BUY orders)
+    if (request.side === "BUY") {
+      this.reserveBalance(requiredUsdc);
     }
 
     try {
@@ -375,6 +526,20 @@ export class ClobClientWrapper {
           size: request.size,
         });
 
+        // Order succeeded - update balance tracking
+        // For BUY: the balance is now reduced by order value (keep reserved as spent)
+        // For SELL: balance will increase when filled
+        if (request.side === "BUY") {
+          const orderCost = request.price * request.size * 1.01;
+          // The reserved amount stays reserved until order fills/cancels
+          // But we should update our known balance to reflect the commitment
+          this.lastKnownBalance = Math.max(
+            0,
+            this.lastKnownBalance - orderCost,
+          );
+          this.releaseBalance(orderCost); // Remove from pending since it's now committed
+        }
+
         return {
           success: true,
           orderId,
@@ -414,10 +579,28 @@ export class ClobClientWrapper {
           errorMsg = errorMsg.substring(0, 97) + "...";
         }
 
+        // Check for balance/allowance error
+        if (
+          errorMsg.toLowerCase().includes("balance") ||
+          errorMsg.toLowerCase().includes("allowance")
+        ) {
+          this.lastBalanceInsufficientTime = Date.now();
+          this.lastKnownBalance = 0; // Reset to force re-fetch
+          logger.warn("Balance/allowance error detected, entering cooldown", {
+            cooldownMs: this.BALANCE_COOLDOWN_MS,
+          });
+        }
+
         logger.warn("Order submission issue", {
           response: JSON.stringify(resp),
           errorMsg,
         });
+
+        // Release reserved balance
+        if (request.side === "BUY") {
+          this.releaseBalance(request.price * request.size * 1.01);
+        }
+
         return {
           success: false,
           errorMessage: errorMsg,
@@ -425,6 +608,20 @@ export class ClobClientWrapper {
       }
     } catch (error) {
       let errorMessage = (error as Error).message;
+
+      // Check for balance/allowance error from API response
+      const errorStr = String(error);
+      if (
+        errorStr.includes("not enough balance") ||
+        errorStr.includes("allowance")
+      ) {
+        this.lastBalanceInsufficientTime = Date.now();
+        this.lastKnownBalance = 0; // Reset to force re-fetch
+        errorMessage = "Insufficient balance/allowance";
+        logger.warn("Balance/allowance error from API, entering cooldown", {
+          cooldownMs: this.BALANCE_COOLDOWN_MS,
+        });
+      }
 
       // Clean up common error messages
       if (
@@ -452,6 +649,11 @@ export class ClobClientWrapper {
         side: request.side,
       });
 
+      // Release reserved balance
+      if (request.side === "BUY") {
+        this.releaseBalance(request.price * request.size * 1.01);
+      }
+
       return {
         success: false,
         errorMessage,
@@ -468,7 +670,7 @@ export class ClobClientWrapper {
     side: TradeSide,
     targetPrice: number,
     size: number,
-    slippage: number = 0.01
+    slippage: number = 0.01,
   ): Promise<OrderResult> {
     // Calculate limit price with slippage
     let limitPrice: number;
@@ -521,7 +723,7 @@ export class ClobClientWrapper {
       // Check if error is retryable
       const errorMsg = result.errorMessage || "";
       const isRetryable = RETRYABLE_ERRORS.some((e) =>
-        errorMsg.toLowerCase().includes(e.toLowerCase())
+        errorMsg.toLowerCase().includes(e.toLowerCase()),
       );
 
       if (!isRetryable || attempt >= MAX_RETRIES) {
@@ -536,13 +738,17 @@ export class ClobClientWrapper {
         error: errorMsg,
       });
 
-      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * (attempt + 1)));
+      await new Promise((resolve) =>
+        setTimeout(resolve, RETRY_DELAY_MS * (attempt + 1)),
+      );
     }
 
-    return lastResult || {
-      success: false,
-      errorMessage: "Max retries exceeded",
-    };
+    return (
+      lastResult || {
+        success: false,
+        errorMessage: "Max retries exceeded",
+      }
+    );
   }
 
   /**
@@ -744,7 +950,7 @@ export class ClobClientWrapper {
 
     try {
       const result = await this.client.getTradesPaginated(
-        options?.market ? { market: options.market } : undefined
+        options?.market ? { market: options.market } : undefined,
       );
       return {
         trades: (result.data || []).map((t) => ({
@@ -892,7 +1098,7 @@ export class ClobClientWrapper {
                   marketInfo.question ||
                     marketInfo.title ||
                     pos.market ||
-                    "Unknown"
+                    "Unknown",
                 );
                 conditionId = marketInfo.conditionId
                   ? String(marketInfo.conditionId)
@@ -933,7 +1139,7 @@ export class ClobClientWrapper {
       logger.debug(
         `Found ${
           positions.length
-        } open positions, total value: $${totalValue.toFixed(2)}`
+        } open positions, total value: $${totalValue.toFixed(2)}`,
       );
 
       return { positions, totalValue, totalFees };
@@ -949,7 +1155,7 @@ export class ClobClientWrapper {
    * Get conditional token balance for a specific token ID
    */
   async getTokenBalance(
-    tokenId: string
+    tokenId: string,
   ): Promise<{ balance: string; allowance: string }> {
     if (!this.client) {
       throw new Error("Client not initialized");
@@ -1061,7 +1267,7 @@ export class ClobClientWrapper {
 let clobClientInstance: ClobClientWrapper | null = null;
 
 export async function getClobClient(
-  forceNew: boolean = false
+  forceNew: boolean = false,
 ): Promise<ClobClientWrapper> {
   if (clobClientInstance && !forceNew) {
     return clobClientInstance;

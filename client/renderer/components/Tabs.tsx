@@ -180,15 +180,24 @@ export default function Tabs({
     });
   }, [realtimeLogs, logs]);
 
-  // Position price polling - FAST (500ms for real-time P&L feel)
+  // Position price polling - reasonable interval to prevent API rate limiting
   useEffect(() => {
+    let lastStats: DashboardStats | null = null;
+
     const fetchPositionPrices = async () => {
       try {
         const [statsRes, positionsRes] = await Promise.all([
           window.ipc?.invoke<DashboardStats>("stats:get"),
           window.ipc?.invoke<{ positions: Position[] }>("portfolio:get"),
         ]);
-        if (statsRes) setStats(statsRes);
+        // Only update stats if we got valid data (balance > 0 or first call)
+        if (statsRes && (statsRes.balance > 0 || !lastStats)) {
+          lastStats = statsRes;
+          setStats(statsRes);
+        } else if (statsRes && lastStats && statsRes.balance === 0) {
+          // Keep showing last known good balance to prevent flickering
+          setStats({ ...statsRes, balance: lastStats.balance });
+        }
         if (positionsRes?.positions) setPositions(positionsRes.positions);
       } catch (e) {
         console.error("Failed to fetch position prices:", e);
@@ -196,8 +205,8 @@ export default function Tabs({
     };
 
     fetchPositionPrices();
-    // Poll every 500ms for snappy real-time updates
-    const fastInterval = setInterval(fetchPositionPrices, 500);
+    // Poll every 3 seconds (was 500ms) to prevent API rate limiting
+    const fastInterval = setInterval(fetchPositionPrices, 3000);
     return () => clearInterval(fastInterval);
   }, []);
 
@@ -1900,6 +1909,7 @@ function PortfolioView({
   onSell: () => void;
 }) {
   const [selling, setSelling] = useState<string | null>(null);
+  const [redeeming, setRedeeming] = useState<string | null>(null);
 
   const activePositions = positions.filter((p) => p.shares > 0 && !p.settled);
   const closedPositions = positions.filter((p) => p.shares === 0 || p.settled);
@@ -1912,7 +1922,7 @@ function PortfolioView({
   const totalCost = activePositions.reduce((sum, p) => sum + p.totalCost, 0);
 
   const handleSell = async (tokenId: string) => {
-    if (selling) return;
+    if (selling || redeeming) return;
     setSelling(tokenId);
     try {
       const result = await window.ipc?.invoke<{
@@ -1929,6 +1939,27 @@ function PortfolioView({
       console.error("Sell error:", e);
     } finally {
       setSelling(null);
+    }
+  };
+
+  const handleRedeem = async (tokenId: string, conditionId?: string) => {
+    if (selling || redeeming) return;
+    setRedeeming(tokenId);
+    try {
+      const result = await window.ipc?.invoke<{
+        success: boolean;
+        txHash?: string;
+        error?: string;
+      }>("position:redeem", { tokenId, conditionId });
+      if (result?.success) {
+        onSell(); // Refresh data
+      } else {
+        console.error("Redeem failed:", result?.error);
+      }
+    } catch (e) {
+      console.error("Redeem error:", e);
+    } finally {
+      setRedeeming(null);
     }
   };
 
@@ -2029,7 +2060,9 @@ function PortfolioView({
                   key={idx}
                   position={pos}
                   onSell={handleSell}
+                  onRedeem={handleRedeem}
                   selling={selling === pos.tokenId}
+                  redeeming={redeeming === pos.tokenId}
                 />
               ))}
             </div>
@@ -2084,14 +2117,20 @@ function PortfolioView({
 function PositionRowWithSell({
   position,
   onSell,
+  onRedeem,
   selling,
+  redeeming,
 }: {
   position: Position;
   onSell: (tokenId: string) => void;
+  onRedeem: (tokenId: string, conditionId?: string) => void;
   selling: boolean;
+  redeeming: boolean;
 }) {
   const isUp = position.pnl >= 0;
   const pnlColor = isUp ? "text-emerald-400" : "text-rose-400";
+  const isResolved = position.isResolved || position.isRedeemable;
+  const isLoading = selling || redeeming;
 
   // Use the market name as-is if it looks like a proper question, otherwise format the slug
   const displayMarket =
@@ -2124,9 +2163,16 @@ function PositionRowWithSell({
             src={imageUrl}
           />
         )}
-        <span className="text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] text-white/80 group-hover:text-white truncate transition-colors">
-          {displayMarket}
-        </span>
+        <div className="flex flex-col min-w-0">
+          <span className="text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] text-white/80 group-hover:text-white truncate transition-colors">
+            {displayMarket}
+          </span>
+          {isResolved && (
+            <span className="text-[9px] @[400px]:text-[10px] font-medium text-amber-400/80 uppercase tracking-wider">
+              ✓ Resolved
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Right side info */}
@@ -2178,18 +2224,24 @@ function PositionRowWithSell({
           </span>
         </div>
 
-        {/* Sell button */}
+        {/* Sell/Redeem button */}
         <div className="w-14 @[400px]:w-16 @[500px]:w-18 flex items-center justify-end">
           <button
-            onClick={() => onSell(position.tokenId)}
-            disabled={selling}
+            onClick={() =>
+              isResolved
+                ? onRedeem(position.tokenId, position.conditionId)
+                : onSell(position.tokenId)
+            }
+            disabled={isLoading}
             className={`text-[11px] @[400px]:text-[12px] font-medium px-2 @[400px]:px-3 py-1 @[400px]:py-1.5 rounded transition-all ${
-              selling
+              isLoading
                 ? "bg-white/10 text-white/40 cursor-not-allowed"
-                : "bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 active:bg-rose-500/40"
+                : isResolved
+                  ? "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 active:bg-emerald-500/40"
+                  : "bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 active:bg-rose-500/40"
             }`}
           >
-            {selling ? (
+            {isLoading ? (
               <svg
                 className="w-3 h-3 @[400px]:w-4 @[400px]:h-4 animate-spin"
                 fill="none"
@@ -2209,6 +2261,8 @@ function PositionRowWithSell({
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                 ></path>
               </svg>
+            ) : isResolved ? (
+              "Redeem"
             ) : (
               "Sell"
             )}

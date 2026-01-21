@@ -127,7 +127,7 @@ export class BotService {
     data: any;
     timestamp: number;
   } | null = null;
-  private readonly LIVE_STATS_CACHE_TTL = 5000; // 5 seconds
+  private readonly LIVE_STATS_CACHE_TTL = 30000; // 30 seconds to prevent rate limiting
 
   constructor(dataDir: string) {
     this.dataDir = dataDir;
@@ -1529,7 +1529,7 @@ export class BotService {
       let polyApiSecret: string | null = null;
       let polyPassphrase: string | null = null;
       let polyFunderAddress: string | null = null;
-      let signatureType: number = 1; // Default to 1 (Magic/Email login) since most users use that
+      let signatureType: number = 0; // Default to 0 (EOA/browser wallet)
 
       if (accountsState.activeAccountId && accountsState.accounts) {
         const activeAccount = accountsState.accounts.find(
@@ -1541,8 +1541,8 @@ export class BotService {
           polyApiSecret = activeAccount.polyApiSecret;
           polyPassphrase = activeAccount.polyPassphrase;
           polyFunderAddress = activeAccount.polyFunderAddress;
-          // Use signatureType from account, default to 1 (Magic/Email login)
-          signatureType = activeAccount.signatureType ?? 1;
+          // Use signatureType from account, default to 0 (EOA wallet)
+          signatureType = activeAccount.signatureType ?? 0;
           this.log(
             "info",
             `Using credentials from active account: ${activeAccount.name} (${activeAccount.address}), signatureType: ${signatureType}`,
@@ -1961,9 +1961,15 @@ export class BotService {
         }
       }
 
-      // Fallback to LiveDataClient if CLOB client didn't get data
-      if (balance === 0 && trades.length === 0 && this.liveDataClient) {
+      // Fallback to LiveDataClient ONLY if CLOB client completely failed (no positions AND no balance)
+      // Don't fallback if we have positions - that means CLOB is working, just maybe no USDC balance
+      const clobWorked = positions.length > 0 || balance > 0;
+      if (!clobWorked && this.liveDataClient) {
         try {
+          this.log(
+            "debug",
+            "CLOB client returned no data, trying LiveDataClient fallback",
+          );
           const liveData = await this.liveDataClient.getLiveData();
           balance = liveData.balance || 0;
           positions = liveData.positions || [];

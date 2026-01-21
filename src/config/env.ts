@@ -102,7 +102,7 @@ export function loadEnvConfig(): EnvConfig {
     dataApiUrl: getEnvString("DATA_API_URL", "https://data-api.polymarket.com"),
     gammaApiUrl: getEnvString(
       "GAMMA_API_URL",
-      "https://gamma-api.polymarket.com"
+      "https://gamma-api.polymarket.com",
     ),
 
     // Persistence
@@ -159,14 +159,14 @@ export function validateEnvConfig(config: EnvConfig): {
   ) {
     if (needsRealKey) {
       errors.push(
-        "PRIVATE_KEY is required for live trading. Set it in .env file."
+        "PRIVATE_KEY is required for live trading. Set it in .env file.",
       );
     }
   } else if (!/^[a-fA-F0-9]{64}$/.test(config.privateKey)) {
     // Only validate key format if we actually need a real key
     if (needsRealKey) {
       errors.push(
-        "PRIVATE_KEY should be a 64-character hex string without 0x prefix."
+        "PRIVATE_KEY should be a 64-character hex string without 0x prefix.",
       );
     }
   }
@@ -174,7 +174,7 @@ export function validateEnvConfig(config: EnvConfig): {
   // Validate chain ID
   if (config.chainId !== 137 && config.chainId !== 80001) {
     errors.push(
-      "CHAIN_ID should be 137 (Polygon Mainnet) or 80001 (Mumbai Testnet)."
+      "CHAIN_ID should be 137 (Polygon Mainnet) or 80001 (Mumbai Testnet).",
     );
   }
 
@@ -193,7 +193,7 @@ export function validateEnvConfig(config: EnvConfig): {
   // Validate numeric ranges
   if (config.pollIntervalMs < 100) {
     errors.push(
-      "POLL_INTERVAL_MS should be at least 100ms to avoid rate limiting."
+      "POLL_INTERVAL_MS should be at least 100ms to avoid rate limiting.",
     );
   }
   if (config.slippage < 0 || config.slippage > 0.5) {

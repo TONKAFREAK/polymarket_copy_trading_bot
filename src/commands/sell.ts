@@ -40,45 +40,74 @@ interface SellResult {
 }
 
 /**
- * Get the best bid price for a token
+ * Get the best bid price for a token with retry logic
  */
 async function getBestBidPrice(
   clobClient: ClobClientWrapper,
-  tokenId: string
+  tokenId: string,
+  maxRetries: number = 3
 ): Promise<number | null> {
-  try {
-    // Access the underlying CLOB client
-    const client = (clobClient as any).client;
-    if (!client) {
-      logger.error("CLOB client not available");
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      // Access the underlying CLOB client
+      const client = (clobClient as any).client;
+      if (!client) {
+        logger.error("CLOB client not available");
+        return null;
+      }
+
+      // Get the best price for selling (best bid)
+      const priceData = await client.getPrice(tokenId, "SELL");
+
+      if (priceData && priceData.price) {
+        return parseFloat(priceData.price);
+      }
+
+      // If no price data, try getting the orderbook
+      try {
+        const orderbook = await client.getOrderBook(tokenId);
+        if (orderbook && orderbook.bids && orderbook.bids.length > 0) {
+          const bestBid = orderbook.bids[0];
+          return parseFloat(bestBid.price);
+        }
+      } catch {
+        // Orderbook fetch failed, continue
+      }
+
       return null;
+    } catch (error) {
+      lastError = error as Error;
+      logger.debug("Price fetch failed, retrying...", {
+        tokenId: tokenId.substring(0, 16) + "...",
+        attempt: attempt + 1,
+        error: lastError.message,
+      });
+
+      // Wait before retry with exponential backoff
+      if (attempt < maxRetries - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      }
     }
-
-    // Get the best price for selling (best bid)
-    const priceData = await client.getPrice(tokenId, "SELL");
-
-    if (priceData && priceData.price) {
-      return parseFloat(priceData.price);
-    }
-
-    return null;
-  } catch (error) {
-    logger.error("Failed to get best bid price", {
-      tokenId,
-      error: (error as Error).message,
-    });
-    return null;
   }
+
+  logger.error("Failed to get best bid price after retries", {
+    tokenId: tokenId.substring(0, 16) + "...",
+    error: lastError?.message,
+  });
+  return null;
 }
 
 /**
- * Sell a position at the best available price
+ * Sell a position at the best available price with retry logic
  */
 async function sellPosition(
   clobClient: ClobClientWrapper,
   position: Position,
   slippage: number = 0.02, // 2% slippage by default
-  dryRun: boolean = false
+  dryRun: boolean = false,
+  maxRetries: number = 2
 ): Promise<SellResult> {
   const result: SellResult = {
     tokenId: position.tokenId,
@@ -90,60 +119,109 @@ async function sellPosition(
     success: false,
   };
 
-  try {
-    // Get the best bid price
-    const bestBid = await getBestBidPrice(clobClient, position.tokenId);
+  let lastError: string | null = null;
 
-    if (!bestBid || bestBid <= 0) {
-      result.error = "No bids available - market may be illiquid";
-      return result;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      // Get the best bid price
+      const bestBid = await getBestBidPrice(clobClient, position.tokenId);
+
+      if (!bestBid || bestBid <= 0) {
+        // Try a fallback price if no bids (use last known price or entry price)
+        const fallbackPrice = position.avgEntryPrice || 0.5;
+        logger.warn("No bids available, using fallback price", {
+          tokenId: position.tokenId.substring(0, 16) + "...",
+          fallbackPrice,
+        });
+
+        if (fallbackPrice <= 0.01) {
+          result.error = "No bids available and no fallback price";
+          return result;
+        }
+      }
+
+      const effectiveBid = bestBid || position.avgEntryPrice || 0.5;
+
+      // Apply slippage to get the minimum acceptable price
+      const minPrice = Math.max(effectiveBid * (1 - slippage), 0.01);
+      const roundedPrice = Math.round(minPrice * 100) / 100;
+
+      result.price = roundedPrice;
+      result.value = roundedPrice * position.shares;
+
+      logger.info("Selling position", {
+        market: position.market.substring(0, 40),
+        outcome: position.outcome,
+        shares: position.shares,
+        bestBid: bestBid || "N/A",
+        sellPrice: roundedPrice,
+        estimatedValue: result.value.toFixed(2),
+        attempt: attempt + 1,
+      });
+
+      if (dryRun) {
+        result.success = true;
+        result.orderId = `DRY_RUN_${Date.now()}`;
+        return result;
+      }
+
+      // Place the sell order using the marketable limit order approach
+      const orderResult = await clobClient.placeMarketableLimitOrder(
+        position.tokenId,
+        "SELL",
+        effectiveBid, // Target price is best bid or fallback
+        position.shares,
+        slippage
+      );
+
+      if (orderResult.success) {
+        result.success = true;
+        result.orderId = orderResult.orderId;
+        result.price = orderResult.executedPrice || roundedPrice;
+        result.value = result.price * position.shares;
+        return result;
+      } else {
+        lastError = orderResult.errorMessage || "Order placement failed";
+
+        // Check if error is retryable
+        const retryableErrors = ["rate limit", "ECONNRESET", "ETIMEDOUT", "timeout", "blocked"];
+        const isRetryable = retryableErrors.some((e) =>
+          lastError!.toLowerCase().includes(e.toLowerCase())
+        );
+
+        if (!isRetryable || attempt >= maxRetries) {
+          result.error = lastError;
+          return result;
+        }
+
+        logger.warn("Sell order failed, retrying...", {
+          error: lastError,
+          attempt: attempt + 1,
+          maxRetries,
+        });
+
+        // Wait before retry
+        await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+      }
+    } catch (error) {
+      lastError = (error as Error).message;
+
+      if (attempt >= maxRetries) {
+        result.error = lastError;
+        return result;
+      }
+
+      logger.warn("Sell attempt failed, retrying...", {
+        error: lastError,
+        attempt: attempt + 1,
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
     }
-
-    // Apply slippage to get the minimum acceptable price
-    const minPrice = Math.max(bestBid * (1 - slippage), 0.01);
-    const roundedPrice = Math.round(minPrice * 100) / 100;
-
-    result.price = roundedPrice;
-    result.value = roundedPrice * position.shares;
-
-    logger.info("Selling position", {
-      market: position.market.substring(0, 40),
-      outcome: position.outcome,
-      shares: position.shares,
-      bestBid,
-      sellPrice: roundedPrice,
-      estimatedValue: result.value.toFixed(2),
-    });
-
-    if (dryRun) {
-      result.success = true;
-      result.orderId = `DRY_RUN_${Date.now()}`;
-      return result;
-    }
-
-    // Place the sell order using the marketable limit order approach
-    const orderResult = await clobClient.placeMarketableLimitOrder(
-      position.tokenId,
-      "SELL",
-      bestBid, // Target price is best bid
-      position.shares,
-      slippage
-    );
-
-    if (orderResult.success) {
-      result.success = true;
-      result.orderId = orderResult.orderId;
-      result.price = orderResult.executedPrice || roundedPrice;
-      result.value = result.price * position.shares;
-    } else {
-      result.error = orderResult.errorMessage || "Order placement failed";
-    }
-
-    return result;
-  } catch (error) {
-    result.error = (error as Error).message;
-    return result;
   }
+
+  result.error = lastError || "Max retries exceeded";
+  return result;
 }
 
 /**

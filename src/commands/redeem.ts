@@ -89,60 +89,98 @@ async function checkConditionResolution(
 }
 
 /**
- * Redeem positions for a resolved market
+ * Redeem positions for a resolved market with retry logic
  */
 async function redeemPosition(
   _wallet: ethers.Wallet,
   ctf: ethers.Contract,
   conditionId: string,
-  gasSettings: { gasPrice: ethers.BigNumber; gasLimit: number }
+  gasSettings: { gasPrice: ethers.BigNumber; gasLimit: number },
+  maxRetries: number = 2
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
-  try {
-    const conditionIdBytes32 = conditionId.startsWith("0x")
-      ? conditionId
-      : `0x${conditionId}`;
+  let lastError: string | null = null;
 
-    // Get outcome count
-    const outcomeCount = await ctf.getOutcomeSlotCount(conditionIdBytes32);
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const conditionIdBytes32 = conditionId.startsWith("0x")
+        ? conditionId
+        : `0x${conditionId}`;
 
-    // Create index sets for all outcomes
-    // For binary markets (YES/NO), indexSets would be [1, 2] representing [01, 10] in binary
-    const indexSets: number[] = [];
-    for (let i = 0; i < outcomeCount.toNumber(); i++) {
-      indexSets.push(1 << i); // 2^i
+      // Get outcome count
+      const outcomeCount = await ctf.getOutcomeSlotCount(conditionIdBytes32);
+
+      // Create index sets for all outcomes
+      // For binary markets (YES/NO), indexSets would be [1, 2] representing [01, 10] in binary
+      const indexSets: number[] = [];
+      for (let i = 0; i < outcomeCount.toNumber(); i++) {
+        indexSets.push(1 << i); // 2^i
+      }
+
+      // Parent collection ID is usually 0x0 for top-level positions
+      const parentCollectionId = ethers.constants.HashZero;
+
+      console.log(
+        `   📝 Redeeming position for condition ${conditionId.substring(
+          0,
+          10
+        )}...${attempt > 0 ? ` (retry ${attempt})` : ""}`
+      );
+
+      const tx = await ctf.redeemPositions(
+        POLYGON_CONTRACTS.collateral,
+        parentCollectionId,
+        conditionIdBytes32,
+        indexSets,
+        gasSettings
+      );
+
+      console.log(`   TX: ${tx.hash}`);
+      console.log("   ⏳ Waiting for confirmation...");
+      await tx.wait();
+
+      return { success: true, txHash: tx.hash };
+    } catch (error) {
+      lastError = (error as Error).message;
+
+      // Check if error is retryable
+      const retryableErrors = [
+        "nonce",
+        "replacement fee",
+        "timeout",
+        "network",
+        "ETIMEDOUT",
+        "ECONNRESET",
+      ];
+      const isRetryable = retryableErrors.some((e) =>
+        lastError!.toLowerCase().includes(e.toLowerCase())
+      );
+
+      // Don't retry if not a transient error
+      if (!isRetryable) {
+        logger.error("Failed to redeem position (non-retryable)", {
+          conditionId,
+          error: lastError,
+        });
+        return { success: false, error: lastError };
+      }
+
+      if (attempt < maxRetries) {
+        logger.warn("Redemption failed, retrying...", {
+          conditionId: conditionId.substring(0, 16) + "...",
+          error: lastError,
+          attempt: attempt + 1,
+        });
+        // Wait before retry with exponential backoff
+        await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)));
+      }
     }
-
-    // Parent collection ID is usually 0x0 for top-level positions
-    const parentCollectionId = ethers.constants.HashZero;
-
-    console.log(
-      `   📝 Redeeming position for condition ${conditionId.substring(
-        0,
-        10
-      )}...`
-    );
-
-    const tx = await ctf.redeemPositions(
-      POLYGON_CONTRACTS.collateral,
-      parentCollectionId,
-      conditionIdBytes32,
-      indexSets,
-      gasSettings
-    );
-
-    console.log(`   TX: ${tx.hash}`);
-    console.log("   ⏳ Waiting for confirmation...");
-    await tx.wait();
-
-    return { success: true, txHash: tx.hash };
-  } catch (error) {
-    const errorMsg = (error as Error).message;
-    logger.error("Failed to redeem position", {
-      conditionId,
-      error: errorMsg,
-    });
-    return { success: false, error: errorMsg };
   }
+
+  logger.error("Failed to redeem position after retries", {
+    conditionId,
+    error: lastError,
+  });
+  return { success: false, error: lastError || "Max retries exceeded" };
 }
 
 /**

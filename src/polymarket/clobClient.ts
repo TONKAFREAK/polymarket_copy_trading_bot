@@ -1072,67 +1072,91 @@ export class ClobClientWrapper {
       let totalValue = 0;
       let totalFees = 0;
 
-      for (const pos of positionMap.values()) {
-        if (Math.abs(pos.shares) >= 0.01) {
-          // Get current token balance to verify
-          const { balance } = await this.getTokenBalance(pos.tokenId);
-          // Balance is in micro-units (6 decimals), convert to actual shares
-          const rawBalance = parseFloat(balance) || 0;
-          const actualShares = rawBalance / 1_000_000;
+      // Filter positions with meaningful shares
+      const significantPositions = Array.from(positionMap.values()).filter(
+        (pos) => Math.abs(pos.shares) >= 0.01
+      );
 
-          if (actualShares >= 0.01) {
-            const avgPrice = pos.shares > 0 ? pos.totalCost / pos.shares : 0;
-            // Current value = shares * avg entry price
-            const currentValue = actualShares * avgPrice;
+      if (significantPositions.length === 0) {
+        return { positions: [], totalValue: 0, totalFees: 0 };
+      }
 
-            // Fetch market info for resolution status
-            let marketName = pos.market || "Unknown";
-            let conditionId: string | undefined;
-            let isResolved = false;
-            let isRedeemable = false;
+      // Fetch all token balances in parallel with batching (prevents rate limiting)
+      const tokenIds = significantPositions.map((pos) => pos.tokenId);
+      const balanceMap = await this.getTokenBalancesBatch(tokenIds, 5, 100);
 
-            try {
-              const marketInfo = await gammaApi.getMarketByTokenId(pos.tokenId);
-              if (marketInfo) {
-                marketName = String(
-                  marketInfo.question ||
-                    marketInfo.title ||
-                    pos.market ||
-                    "Unknown",
-                );
-                conditionId = marketInfo.conditionId
-                  ? String(marketInfo.conditionId)
-                  : undefined;
-                isResolved =
-                  marketInfo.closed === true ||
-                  String(marketInfo.closed) === "true";
+      // Fetch market info in parallel batches as well
+      const marketInfoPromises = significantPositions.map(async (pos) => {
+        try {
+          return await gammaApi.getMarketByTokenId(pos.tokenId);
+        } catch {
+          return null;
+        }
+      });
 
-                // Check if redeemable (resolved AND we might be a winner)
-                // For now, mark as redeemable if resolved - actual redemption will verify
-                if (isResolved && conditionId) {
-                  isRedeemable = true;
-                }
-              }
-            } catch {
-              // Ignore market fetch errors
+      // Process in batches of 10 to avoid overwhelming the API
+      const marketInfoResults: Array<unknown> = [];
+      const MARKET_BATCH_SIZE = 10;
+      for (let i = 0; i < marketInfoPromises.length; i += MARKET_BATCH_SIZE) {
+        const batch = marketInfoPromises.slice(i, i + MARKET_BATCH_SIZE);
+        const batchResults = await Promise.all(batch);
+        marketInfoResults.push(...batchResults);
+        if (i + MARKET_BATCH_SIZE < marketInfoPromises.length) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
+
+      // Build positions with fetched data
+      for (let i = 0; i < significantPositions.length; i++) {
+        const pos = significantPositions[i];
+        const balanceData = balanceMap.get(pos.tokenId);
+        const rawBalance = parseFloat(balanceData?.balance || "0") || 0;
+        const actualShares = rawBalance / 1_000_000;
+
+        if (actualShares >= 0.01) {
+          const avgPrice = pos.shares > 0 ? pos.totalCost / pos.shares : 0;
+          const currentValue = actualShares * avgPrice;
+
+          let marketName = pos.market || "Unknown";
+          let conditionId: string | undefined;
+          let isResolved = false;
+          let isRedeemable = false;
+
+          const marketInfo = marketInfoResults[i] as Record<string, unknown> | null;
+          if (marketInfo) {
+            marketName = String(
+              marketInfo.question ||
+                marketInfo.title ||
+                pos.market ||
+                "Unknown",
+            );
+            conditionId = marketInfo.conditionId
+              ? String(marketInfo.conditionId)
+              : undefined;
+            isResolved =
+              marketInfo.closed === true ||
+              String(marketInfo.closed) === "true";
+
+            if (isResolved && conditionId) {
+              isRedeemable = true;
             }
-
-            positions.push({
-              tokenId: pos.tokenId,
-              outcome: pos.outcome,
-              shares: actualShares,
-              avgEntryPrice: avgPrice,
-              currentValue,
-              market: marketName,
-              conditionId,
-              isResolved,
-              isRedeemable,
-              feesPaid: pos.totalFees,
-            });
-
-            totalValue += currentValue;
-            totalFees += pos.totalFees;
           }
+
+          positions.push({
+            tokenId: pos.tokenId,
+            outcome: pos.outcome,
+            shares: actualShares,
+            avgEntryPrice: avgPrice,
+            currentValue,
+            market: marketName,
+            conditionId,
+            isResolved,
+            isRedeemable,
+            feesPaid: pos.totalFees,
+          });
+
+          totalValue += currentValue;
+          totalFees += pos.totalFees;
         }
       }
 
@@ -1177,6 +1201,62 @@ export class ClobClientWrapper {
       });
       return { balance: "0", allowance: "0" };
     }
+  }
+
+  /**
+   * Get multiple token balances in parallel with controlled concurrency
+   * This reduces total API calls by batching and prevents rate limiting
+   */
+  async getTokenBalancesBatch(
+    tokenIds: string[],
+    concurrency: number = 5,
+    delayBetweenBatches: number = 100,
+  ): Promise<Map<string, { balance: string; allowance: string }>> {
+    if (!this.client) {
+      throw new Error("Client not initialized");
+    }
+
+    const results = new Map<string, { balance: string; allowance: string }>();
+
+    // Process in batches with controlled concurrency
+    for (let i = 0; i < tokenIds.length; i += concurrency) {
+      const batch = tokenIds.slice(i, i + concurrency);
+
+      const batchResults = await Promise.all(
+        batch.map(async (tokenId) => {
+          try {
+            const result = await this.client!.getBalanceAllowance({
+              asset_type: AssetType.CONDITIONAL,
+              token_id: tokenId,
+            });
+            return {
+              tokenId,
+              balance: result.balance || "0",
+              allowance: result.allowance || "0",
+            };
+          } catch (error) {
+            logger.debug("Failed to get token balance in batch", {
+              tokenId: tokenId.substring(0, 16) + "...",
+              error: (error as Error).message,
+            });
+            return { tokenId, balance: "0", allowance: "0" };
+          }
+        })
+      );
+
+      // Store results
+      for (const result of batchResults) {
+        results.set(result.tokenId, { balance: result.balance, allowance: result.allowance });
+      }
+
+      // Add delay between batches to avoid rate limiting
+      if (i + concurrency < tokenIds.length && delayBetweenBatches > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayBetweenBatches));
+      }
+    }
+
+    logger.debug(`Fetched ${results.size} token balances in batches`);
+    return results;
   }
 
   /**

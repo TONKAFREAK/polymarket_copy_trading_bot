@@ -58,6 +58,25 @@ export function isRetryableError(error: AxiosError): boolean {
     return true;
   }
 
+  // Retry on 403 - might be temporary Cloudflare block
+  if (status === 403) {
+    // Check if it's a Cloudflare challenge
+    const data = error.response.data;
+    if (typeof data === 'string' &&
+        (data.includes('Cloudflare') || data.includes('cloudflare') ||
+         data.includes('Attention Required') || data.includes('cf-browser-verification'))) {
+      logger.warn('Cloudflare challenge detected, will retry with backoff');
+      return true;
+    }
+    // Also retry generic 403s with longer backoff
+    return true;
+  }
+
+  // Retry on timeout
+  if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+    return true;
+  }
+
   return false;
 }
 
@@ -73,6 +92,11 @@ export function createHttpClient(
     timeout: 30000,
     headers: {
       "Content-Type": "application/json",
+      // Add User-Agent to avoid Cloudflare blocking
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "application/json, text/plain, */*",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Cache-Control": "no-cache",
     },
   });
 
@@ -235,4 +259,107 @@ export function normalizeAddress(address: string): string {
  */
 export function isValidAddress(address: string): boolean {
   return /^0x[a-fA-F0-9]{40}$/i.test(address);
+}
+
+/**
+ * Simple rate limiter class to prevent API overload
+ * Uses token bucket algorithm
+ */
+export class RateLimiter {
+  private tokens: number;
+  private lastRefill: number;
+  private readonly maxTokens: number;
+  private readonly refillRatePerSecond: number;
+
+  constructor(maxTokens: number = 10, refillRatePerSecond: number = 2) {
+    this.maxTokens = maxTokens;
+    this.tokens = maxTokens;
+    this.refillRatePerSecond = refillRatePerSecond;
+    this.lastRefill = Date.now();
+  }
+
+  /**
+   * Refill tokens based on elapsed time
+   */
+  private refill(): void {
+    const now = Date.now();
+    const elapsedSeconds = (now - this.lastRefill) / 1000;
+    const tokensToAdd = elapsedSeconds * this.refillRatePerSecond;
+    this.tokens = Math.min(this.maxTokens, this.tokens + tokensToAdd);
+    this.lastRefill = now;
+  }
+
+  /**
+   * Check if a request can be made (non-blocking)
+   */
+  canMakeRequest(): boolean {
+    this.refill();
+    return this.tokens >= 1;
+  }
+
+  /**
+   * Wait until a request can be made
+   */
+  async waitForToken(): Promise<void> {
+    this.refill();
+    if (this.tokens >= 1) {
+      this.tokens -= 1;
+      return;
+    }
+
+    // Calculate wait time
+    const tokensNeeded = 1 - this.tokens;
+    const waitTimeMs = (tokensNeeded / this.refillRatePerSecond) * 1000;
+    await sleep(Math.ceil(waitTimeMs));
+    this.refill();
+    this.tokens -= 1;
+  }
+
+  /**
+   * Consume a token immediately (use after making request)
+   */
+  consumeToken(): void {
+    this.refill();
+    if (this.tokens >= 1) {
+      this.tokens -= 1;
+    }
+  }
+}
+
+/**
+ * Global rate limiter for Polymarket API calls
+ * 10 tokens max, refill at 5 per second (conservative rate)
+ */
+export const globalRateLimiter = new RateLimiter(10, 5);
+
+/**
+ * Execute a function with rate limiting
+ */
+export async function withRateLimit<T>(fn: () => Promise<T>): Promise<T> {
+  await globalRateLimiter.waitForToken();
+  return fn();
+}
+
+/**
+ * Execute multiple promises with controlled concurrency and rate limiting
+ */
+export async function parallelWithLimit<T>(
+  tasks: (() => Promise<T>)[],
+  concurrency: number = 5,
+  delayBetweenBatches: number = 100
+): Promise<T[]> {
+  const results: T[] = [];
+
+  for (let i = 0; i < tasks.length; i += concurrency) {
+    const batch = tasks.slice(i, i + concurrency);
+    const batchResults = await Promise.all(batch.map((task) => task()));
+    results.push(...batchResults);
+
+    // Add delay between batches
+    if (i + concurrency < tasks.length && delayBetweenBatches > 0) {
+      await sleep(delayBetweenBatches);
+    }
+  }
+
+  return results;
 }

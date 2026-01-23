@@ -489,7 +489,21 @@ let mainWindow: BrowserWindow | null = null;
     await mainWindow.loadURL("app://./home");
   } else {
     const port = process.argv[2];
-    await mainWindow.loadURL(`http://localhost:${port}/home`);
+    const devUrl = `http://localhost:${port}/home`;
+
+    // Wait a moment for Next.js to be ready, then load directly
+    // Next.js is ready when the process starts, but pages compile on-demand
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Load the URL - Next.js will compile the page on first request
+    try {
+      await mainWindow.loadURL(devUrl);
+    } catch (loadError) {
+      console.error("[Main] Failed to load dev URL, retrying...", loadError);
+      // Wait a bit more and retry
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await mainWindow.loadURL(devUrl);
+    }
     mainWindow.webContents.openDevTools();
   }
 })();
@@ -697,6 +711,50 @@ ipcMain.handle(
   },
 );
 
+// Get balance quickly (for fast UI updates)
+ipcMain.handle("balance:get", async () => {
+  // Determine mode from accounts state
+  const accountsState = loadAccountsState();
+  const mode = accountsState.activeAccountId ? "live" : "paper";
+
+  if (mode === "live") {
+    try {
+      // Initialize CLOB client if needed
+      if (!botService) {
+        return { balance: 0, mode: "live" };
+      }
+
+      // Try to get clobClient from botService
+      let clobClient = (botService as any).clobClient;
+      if (!clobClient) {
+        try {
+          await (botService as any).initializeClobClient();
+          clobClient = (botService as any).clobClient;
+        } catch (e) {
+          console.log("[balance:get] Could not initialize CLOB client");
+          return { balance: 0, mode: "live" };
+        }
+      }
+
+      if (clobClient) {
+        const balances = await clobClient.getBalances();
+        const balance = parseFloat(balances.usdc) || 0;
+        console.log(`[balance:get] LIVE balance: $${balance}`);
+        return { balance, mode: "live" };
+      }
+    } catch (e) {
+      console.error("[balance:get] Error fetching live balance:", e);
+    }
+    return { balance: 0, mode: "live" };
+  }
+
+  // Paper mode: use local state
+  const paperState = readJsonFile("paper-state.json", {
+    currentBalance: 10000,
+  });
+  return { balance: paperState.currentBalance || 10000, mode: "paper" };
+});
+
 // Get dashboard stats
 ipcMain.handle("stats:get", async () => {
   const config = readJsonFile("config.json", {
@@ -878,6 +936,21 @@ ipcMain.handle("portfolio:get", async () => {
     try {
       const liveData = await botService?.getLiveStats();
       if (liveData && liveData.positions) {
+        console.log(`[portfolio:get] Got ${liveData.positions.length} positions from getLiveStats`);
+
+        // Log resolved positions for debugging
+        const resolvedPositions = liveData.positions.filter((p: any) => p.isResolved || p.isRedeemable);
+        if (resolvedPositions.length > 0) {
+          console.log(`[portfolio:get] Found ${resolvedPositions.length} resolved position(s):`,
+            resolvedPositions.map((p: any) => ({
+              tokenId: p.tokenId?.substring(0, 16),
+              isResolved: p.isResolved,
+              isRedeemable: p.isRedeemable,
+              conditionId: p.conditionId?.substring(0, 16)
+            }))
+          );
+        }
+
         // Fetch market metadata by token IDs
         const tokenIds = liveData.positions
           .map((pos: any) => pos.tokenId)
@@ -895,27 +968,25 @@ ipcMain.handle("portfolio:get", async () => {
               ? `https://polymarket-upload.s3.us-east-2.amazonaws.com/${pos.marketSlug}.png`
               : undefined);
 
+          // Use currentPrice from API if available
+          const currentPrice = pos.currentPrice || (pos.shares > 0 ? pos.currentValue / pos.shares : pos.avgEntryPrice);
+          const currentValue = pos.currentValue || pos.shares * currentPrice;
+          const costBasis = pos.avgEntryPrice * pos.shares;
+          const pnl = currentValue - costBasis;
+
           return {
             tokenId: pos.tokenId,
             outcome: pos.outcome || "YES",
             shares: pos.shares || 0,
             avgEntryPrice: pos.avgEntryPrice || 0,
-            currentValue: pos.currentValue || 0,
-            currentPrice:
-              pos.shares > 0
-                ? pos.currentValue / pos.shares
-                : pos.avgEntryPrice,
+            currentValue,
+            currentPrice,
             market: marketName,
             marketSlug: pos.marketSlug,
             side: "BUY",
-            pnl: pos.currentValue - pos.avgEntryPrice * pos.shares,
-            pnlPercent:
-              pos.avgEntryPrice > 0
-                ? ((pos.currentValue / pos.shares - pos.avgEntryPrice) /
-                    pos.avgEntryPrice) *
-                  100
-                : 0,
-            totalCost: pos.avgEntryPrice * pos.shares,
+            pnl,
+            pnlPercent: pos.avgEntryPrice > 0 ? (pnl / costBasis) * 100 : 0,
+            totalCost: costBasis,
             openedAt: Date.now(),
             isResolved: pos.isResolved || false,
             isRedeemable: pos.isRedeemable || false,
@@ -928,7 +999,37 @@ ipcMain.handle("portfolio:get", async () => {
 
         // Filter to show only positions with shares > 0
         const activePositions = positions.filter((p: any) => p.shares > 0);
-        return { positions: activePositions };
+
+        // Add closed positions with realized PnL
+        const closedPositions = (liveData.closedPositions || []).map((pos: any) => {
+          const meta = pos.tokenId ? tokenIdToMetaCache.get(pos.tokenId) : null;
+          const marketName = meta?.question || meta?.title || pos.market || "Unknown Market";
+          const imageUrl = meta?.image || undefined;
+
+          return {
+            tokenId: pos.tokenId,
+            outcome: pos.outcome || "YES",
+            shares: 0,
+            avgEntryPrice: pos.avgEntryPrice || 0,
+            currentValue: 0,
+            currentPrice: pos.avgExitPrice || 0,
+            market: marketName,
+            side: "SELL",
+            pnl: pos.pnl || 0,
+            settlementPnl: pos.settlementPnl || pos.pnl || 0,
+            pnlPercent: pos.avgEntryPrice > 0
+              ? ((pos.avgExitPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100
+              : 0,
+            totalCost: 0,
+            openedAt: pos.closedAt || Date.now(),
+            isResolved: true,
+            isRedeemable: false,
+            settled: true,
+            image: imageUrl,
+          };
+        });
+
+        return { positions: [...activePositions, ...closedPositions] };
       }
       // Live mode but no positions - return empty array (do NOT fall through to paper)
       return { positions: [] };
@@ -1127,7 +1228,7 @@ ipcMain.handle("performance:get", async () => {
   const accountsState = loadAccountsState();
   const mode = accountsState.activeAccountId ? "live" : "paper";
 
-  // For LIVE mode, calculate performance from live data
+  // For LIVE mode, use the pre-calculated values from getLiveStats
   if (mode === "live") {
     try {
       const liveData = await botService?.getLiveStats();
@@ -1135,65 +1236,39 @@ ipcMain.handle("performance:get", async () => {
         const trades = liveData.trades || [];
         const positions = liveData.positions || [];
 
-        // Calculate performance metrics from live data
-        const closedTrades = trades.filter((t: any) => t.pnl !== undefined);
-        const winningTrades = closedTrades.filter((t: any) => t.pnl > 0);
-        const losingTrades = closedTrades.filter((t: any) => t.pnl < 0);
-
-        const totalWins = winningTrades.reduce(
-          (sum: number, t: any) => sum + t.pnl,
-          0,
-        );
-        const totalLosses = Math.abs(
-          losingTrades.reduce((sum: number, t: any) => sum + t.pnl, 0),
-        );
-
-        const avgWin =
-          winningTrades.length > 0 ? totalWins / winningTrades.length : 0;
-        const avgLoss =
-          losingTrades.length > 0 ? totalLosses / losingTrades.length : 0;
-
-        const largestWin =
-          winningTrades.length > 0
-            ? Math.max(...winningTrades.map((t: any) => t.pnl))
-            : 0;
-        const largestLoss =
-          losingTrades.length > 0
-            ? Math.min(...losingTrades.map((t: any) => t.pnl))
-            : 0;
-
+        // Use pre-calculated values from getLiveStats
         const totalVolume = trades.reduce(
           (sum: number, t: any) => sum + (t.usdValue || 0),
           0,
         );
-        const totalFees = trades.reduce(
-          (sum: number, t: any) => sum + (t.fees || 0),
-          0,
-        );
 
-        // Calculate unrealized PnL from positions
-        const unrealizedPnl = positions.reduce((sum: number, pos: any) => {
-          const currentValue =
-            pos.currentValue ||
-            pos.shares * (pos.currentPrice || pos.avgEntryPrice);
-          const entryValue = pos.avgEntryPrice * pos.shares;
-          return sum + (currentValue - entryValue);
-        }, 0);
-
-        // Get balance from live data
+        // Get balance and positions value from live data
         const currentBalance = liveData.balance || 0;
-        const positionsValue = positions.reduce((sum: number, pos: any) => {
-          return (
-            sum +
-            (pos.currentValue ||
-              pos.shares * (pos.currentPrice || pos.avgEntryPrice))
-          );
-        }, 0);
+        const positionsValue = liveData.positionsValue || 0;
 
-        // Estimate starting balance (current balance + positions value - unrealized PnL - realized PnL)
-        const realizedPnl = totalWins - totalLosses;
+        // Use values already calculated by getLiveStats
+        const realizedPnl = liveData.realizedPnl || 0;
+        const unrealizedPnl = liveData.unrealizedPnl || 0;
         const totalPnl = realizedPnl + unrealizedPnl;
-        const startingBalance = currentBalance + positionsValue - totalPnl;
+        const totalFees = liveData.totalFees || 0;
+        const winningTradesCount = liveData.winningTrades || 0;
+        const losingTradesCount = liveData.losingTrades || 0;
+        const largestWin = liveData.largestWin || 0;
+        const largestLoss = liveData.largestLoss || 0;
+        const profitFactor = liveData.profitFactor || 0;
+        const avgTradeSize = liveData.avgTradeSize || 0;
+        const winRate = liveData.winRate || 0;
+
+        // Calculate average win/loss from totals
+        const avgWin = winningTradesCount > 0 && realizedPnl > 0
+          ? Math.max(0, realizedPnl) / winningTradesCount
+          : 0;
+        const avgLoss = losingTradesCount > 0 && realizedPnl < 0
+          ? Math.abs(Math.min(0, realizedPnl)) / losingTradesCount
+          : 0;
+
+        // Use starting balance from live data, or calculate it
+        const startingBalance = liveData.startingBalance || (currentBalance + positionsValue - totalPnl);
         const returns =
           startingBalance > 0
             ? ((currentBalance + positionsValue - startingBalance) /
@@ -1202,27 +1277,19 @@ ipcMain.handle("performance:get", async () => {
             : 0;
 
         return {
-          totalTrades: trades.length,
-          winningTrades: winningTrades.length,
-          losingTrades: losingTrades.length,
-          winRate:
-            closedTrades.length > 0
-              ? winningTrades.length / closedTrades.length
-              : 0,
+          totalTrades: liveData.totalTrades || trades.length,
+          winningTrades: winningTradesCount,
+          losingTrades: losingTradesCount,
+          winRate,
           totalPnl,
           realizedPnl,
           unrealizedPnl,
           largestWin,
           largestLoss,
-          profitFactor:
-            totalLosses > 0
-              ? totalWins / totalLosses
-              : totalWins > 0
-                ? Infinity
-                : 0,
+          profitFactor,
           avgWin,
           avgLoss,
-          avgTradeSize: trades.length > 0 ? totalVolume / trades.length : 0,
+          avgTradeSize,
           totalVolume,
           totalFees,
           startingBalance,
@@ -1605,19 +1672,58 @@ ipcMain.handle(
           return { success: false, error: "No shares to sell" };
         }
 
-        // Determine sell price - use provided price, or get market price
+        // Determine sell price - use provided price, or get best bid from orderbook
         let sellPrice = requestedPrice;
         if (!sellPrice) {
-          // Use a default price (the market bid price would be better but requires additional API call)
-          // For now, use 0.50 as a default market price - the order will fill at best available
-          sellPrice = 0.5;
+          try {
+            // Get the best bid price from the CLOB client
+            const client = clobClient.getClient();
+            if (client) {
+              // Try to get the price for selling (best bid)
+              const priceData = await client.getPrice(tokenId, "SELL");
+              if (priceData && priceData.price) {
+                sellPrice = parseFloat(priceData.price);
+                console.log(`[position:sell] Got best bid price: $${sellPrice}`);
+              }
+
+              // If no price from getPrice, try orderbook
+              if (!sellPrice || sellPrice <= 0) {
+                try {
+                  const orderbook = await client.getOrderBook(tokenId);
+                  if (orderbook && orderbook.bids && orderbook.bids.length > 0) {
+                    const bestBid = orderbook.bids[0];
+                    sellPrice = parseFloat(bestBid.price);
+                    console.log(`[position:sell] Got best bid from orderbook: $${sellPrice}`);
+                  }
+                } catch (obError) {
+                  console.log(`[position:sell] Could not fetch orderbook: ${(obError as Error).message}`);
+                }
+              }
+            }
+          } catch (priceError) {
+            console.log(`[position:sell] Could not fetch price: ${(priceError as Error).message}`);
+          }
+
+          // Fallback: use position's avg entry price if we couldn't get market price
+          if (!sellPrice || sellPrice <= 0) {
+            // Try to get position info to use entry price as fallback
+            const liveData = await botService?.getLiveStats();
+            const position = liveData?.positions?.find((p: any) => p.tokenId === tokenId);
+            if (position && position.avgEntryPrice > 0) {
+              sellPrice = position.avgEntryPrice;
+              console.log(`[position:sell] Using entry price as fallback: $${sellPrice}`);
+            } else {
+              sellPrice = 0.5; // Last resort fallback
+              console.log(`[position:sell] Using default fallback price: $${sellPrice}`);
+            }
+          }
         }
 
         // Apply slippage (sell at 2% below target to ensure fill)
         const slippagePrice = Math.max(0.01, sellPrice * 0.98);
 
         console.log(
-          `[position:sell] Placing SELL order: ${sharesToSell} shares @ $${slippagePrice.toFixed(4)}`,
+          `[position:sell] Placing SELL order: ${sharesToSell} shares @ $${slippagePrice.toFixed(4)} (market price: $${sellPrice.toFixed(4)})`,
         );
 
         // Place sell order
@@ -1632,6 +1738,9 @@ ipcMain.handle(
           console.log(
             `[position:sell] LIVE SELL SUCCESS: orderId=${orderResult.orderId}`,
           );
+
+          // Clear position caches so UI updates immediately
+          clobClient.invalidatePositionCache(tokenId);
 
           // Add log entry
           addLog({
@@ -1808,6 +1917,10 @@ ipcMain.handle(
 
         if (result.success) {
           console.log(`[position:redeem] SUCCESS: txHash=${result.txHash}`);
+
+          // Clear position caches so UI updates immediately
+          clobClient.invalidatePositionCache(tokenId);
+          clobClient.clearPositionCaches();
 
           // Add log entry
           addLog({

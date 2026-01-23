@@ -1904,13 +1904,23 @@ export class BotService {
 
       if (this.clobClient) {
         try {
-          // Get USDC balance from CLOB client (authenticated API)
+          // OPTIMIZATION: Fetch balance first (fast), it updates the UI immediately
           const balances = await this.clobClient.getBalances();
           balance = parseFloat(balances.usdc) || 0;
           this.log("debug", `CLOB client balance: $${balance}`);
 
-          // Get positions from CLOB client (aggregates trades + verifies on-chain balances)
-          const positionsResult = await this.clobClient.getPositions();
+          // OPTIMIZATION: Fetch positions and trades in parallel using Promise.all
+          const [positionsResult, tradesResult] = await Promise.all([
+            this.clobClient.getPositions().catch((e: any) => {
+              this.log("warn", `Failed to fetch positions: ${e.message}`);
+              return { positions: [], totalValue: 0, totalFees: 0 };
+            }),
+            this.clobClient.getTrades().catch((e: any) => {
+              this.log("warn", `Failed to fetch trades: ${e.message}`);
+              return { trades: [], count: 0 };
+            }),
+          ]);
+
           if (positionsResult && positionsResult.positions) {
             positions = positionsResult.positions.map((pos: any) => ({
               tokenId: pos.tokenId,
@@ -1931,26 +1941,44 @@ export class BotService {
             );
           }
 
-          // Get trades from CLOB client
-          const tradesResult = await this.clobClient.getTrades();
           if (tradesResult && tradesResult.trades) {
-            trades = tradesResult.trades.map((t: any) => ({
-              id: t.id,
-              timestamp: new Date(t.match_time).getTime(),
-              tokenId: t.asset_id,
-              market: t.market,
-              outcome: t.outcome || "YES",
-              side: t.side?.toUpperCase() || "BUY",
-              price: parseFloat(t.price) || 0,
-              shares: parseFloat(t.size) || 0,
-              usdValue: (parseFloat(t.price) || 0) * (parseFloat(t.size) || 0),
-              fees: t.fee_rate_bps
-                ? (parseFloat(t.price) *
-                    parseFloat(t.size) *
-                    parseFloat(t.fee_rate_bps)) /
-                  10000
-                : 0,
-            }));
+            trades = tradesResult.trades.map((t: any) => {
+              // Fix timestamp parsing - handle both ISO string and Unix timestamp formats
+              let timestamp: number;
+              if (typeof t.match_time === 'string') {
+                // ISO 8601 format: "2024-01-01T10:00:00Z"
+                timestamp = new Date(t.match_time).getTime();
+                // If invalid date, try parsing as Unix timestamp
+                if (isNaN(timestamp)) {
+                  timestamp = parseInt(t.match_time, 10);
+                  if (timestamp < 1e12) timestamp *= 1000; // Convert seconds to ms
+                }
+              } else if (typeof t.match_time === 'number') {
+                timestamp = t.match_time < 1e12 ? t.match_time * 1000 : t.match_time;
+              } else {
+                timestamp = Date.now();
+              }
+
+              const price = parseFloat(t.price) || 0;
+              const size = parseFloat(t.size) || 0;
+              const feeRateBps = parseFloat(t.fee_rate_bps) || 0;
+              // Fee calculation: price * size * (bps / 10000)
+              const fees = price * size * (feeRateBps / 10000);
+
+              return {
+                id: t.id,
+                timestamp,
+                tokenId: t.asset_id,
+                market: t.market,
+                outcome: t.outcome || "YES",
+                side: t.side?.toUpperCase() || "BUY",
+                price,
+                shares: size,
+                usdValue: price * size,
+                fees,
+                feeRateBps,
+              };
+            });
             this.log("debug", `CLOB client trades: ${trades.length}`);
           }
         } catch (e: any) {
@@ -2018,29 +2046,43 @@ export class BotService {
         totalFees += trade.fees || 0;
       }
 
-      // Calculate realized PnL from closed positions (FIFO)
+      // Calculate realized PnL from closed positions (FIFO) and track closed positions
       let realizedPnl = 0;
-      for (const assetTrades of Array.from(tradesByAsset.values())) {
+      const closedPositions: any[] = [];
+
+      for (const [assetId, assetTrades] of Array.from(tradesByAsset.entries())) {
         const sorted = assetTrades.sort(
           (a: any, b: any) => a.timestamp - b.timestamp,
         );
 
         let shares = 0;
         let costBasis = 0;
+        let positionPnl = 0;
+        let totalBought = 0;
+        let totalSold = 0;
+        let lastTrade: any = null;
+        let avgEntryPrice = 0;
+        let avgExitPrice = 0;
 
         for (const trade of sorted) {
           const size = trade.shares || 0;
           const price = trade.price || 0;
           const isBuy = trade.side === "BUY";
+          lastTrade = trade;
 
           if (isBuy) {
             costBasis += size * price;
             shares += size;
+            totalBought += size;
+            avgEntryPrice = shares > 0 ? costBasis / shares : 0;
           } else if (shares > 0) {
             // Calculate realized PnL on sell
             const avgCost = costBasis / shares;
             const pnl = (price - avgCost) * size;
             realizedPnl += pnl;
+            positionPnl += pnl;
+            totalSold += size;
+            avgExitPrice = totalSold > 0 ? (avgExitPrice * (totalSold - size) + price * size) / totalSold : price;
 
             if (pnl > 0) {
               winningTrades++;
@@ -2057,6 +2099,23 @@ export class BotService {
             costBasis -= costBasis * proportion;
             shares -= size;
           }
+        }
+
+        // Track as closed position if fully sold (shares near 0) and had sells
+        if (shares < 0.01 && totalSold > 0 && lastTrade) {
+          closedPositions.push({
+            tokenId: assetId,
+            outcome: lastTrade.outcome || "Yes",
+            shares: 0,
+            avgEntryPrice,
+            avgExitPrice,
+            currentValue: 0,
+            market: lastTrade.market || "Unknown Market",
+            pnl: positionPnl,
+            settlementPnl: positionPnl,
+            settled: true,
+            closedAt: lastTrade.timestamp,
+          });
         }
       }
 
@@ -2103,6 +2162,7 @@ export class BotService {
         balance,
         startingBalance,
         positions,
+        closedPositions,
         positionsValue,
         unrealizedPnl,
         realizedPnl,

@@ -180,12 +180,70 @@ export default function Tabs({
     });
   }, [realtimeLogs, logs]);
 
-  // Position price polling - reasonable interval to prevent API rate limiting
+  // FAST balance polling - separate from slow position fetching
+  useEffect(() => {
+    const fetchBalanceOnly = async () => {
+      try {
+        const balanceRes = await window.ipc?.invoke<{
+          balance: number;
+          mode: string;
+        }>("balance:get");
+        if (balanceRes) {
+          setStats((prev) => {
+            if (!prev) {
+              // Create initial stats object if none exists
+              return {
+                mode: balanceRes.mode as any,
+                balance: balanceRes.balance,
+                startingBalance: balanceRes.balance,
+                openPositions: 0,
+                positionsValue: 0,
+                unrealizedPnl: 0,
+                realizedPnl: 0,
+                totalTrades: 0,
+                totalFees: 0,
+                winRate: 0,
+                winningTrades: 0,
+                losingTrades: 0,
+                largestWin: 0,
+                largestLoss: 0,
+                profitFactor: 0,
+                avgTradeSize: 0,
+                uptime: 0,
+                lastUpdate: Date.now(),
+                pollingInterval: 2000,
+                targetsCount: 0,
+                openOrdersCount: 0,
+                botRunning: false,
+                botConnected: false,
+              };
+            }
+            return {
+              ...prev,
+              balance: balanceRes.balance,
+              mode: balanceRes.mode as any,
+            };
+          });
+        }
+      } catch (e) {
+        console.error("Failed to fetch balance:", e);
+      }
+    };
+
+    // Fetch balance immediately and frequently (every 1 second)
+    fetchBalanceOnly();
+    const balanceInterval = setInterval(fetchBalanceOnly, 1000);
+    return () => clearInterval(balanceInterval);
+  }, []);
+
+  // SLOWER position and stats polling - separate from balance
   useEffect(() => {
     let lastStats: DashboardStats | null = null;
+    let lastPositions: Position[] | null = null;
 
-    const fetchPositionPrices = async () => {
+    const fetchPositionsAndStats = async () => {
       try {
+        // Fetch full stats and positions in parallel
         const [statsRes, positionsRes] = await Promise.all([
           window.ipc?.invoke<DashboardStats>("stats:get"),
           window.ipc?.invoke<{ positions: Position[] }>("portfolio:get"),
@@ -198,16 +256,34 @@ export default function Tabs({
           // Keep showing last known good balance to prevent flickering
           setStats({ ...statsRes, balance: lastStats.balance });
         }
-        if (positionsRes?.positions) setPositions(positionsRes.positions);
+        // Only update positions if we got valid data, keep last known good positions
+        if (positionsRes?.positions && positionsRes.positions.length > 0) {
+          lastPositions = positionsRes.positions;
+          setPositions(positionsRes.positions);
+        } else if (
+          positionsRes?.positions &&
+          lastPositions &&
+          lastPositions.length > 0
+        ) {
+          // API returned empty but we had positions before - might be a transient error
+          // Keep showing last known positions for 1 more cycle
+          console.log(
+            "[Positions] Keeping last known positions to prevent flicker",
+          );
+        } else if (positionsRes?.positions) {
+          // Genuinely no positions
+          setPositions(positionsRes.positions);
+        }
       } catch (e) {
         console.error("Failed to fetch position prices:", e);
+        // On error, don't clear positions - keep last known good state
       }
     };
 
-    fetchPositionPrices();
-    // Poll every 3 seconds (was 500ms) to prevent API rate limiting
-    const fastInterval = setInterval(fetchPositionPrices, 3000);
-    return () => clearInterval(fastInterval);
+    fetchPositionsAndStats();
+    // Poll every 5 seconds for positions (they're slow to fetch)
+    const positionsInterval = setInterval(fetchPositionsAndStats, 5000);
+    return () => clearInterval(positionsInterval);
   }, []);
 
   // Fetch all data periodically (performance stats faster for chart updates)
@@ -240,8 +316,24 @@ export default function Tabs({
     [activeId],
   );
 
-  // Callback to refresh data after actions
+  // Callback to refresh data after actions - balance first, then rest
   const refreshData = useCallback(async () => {
+    // First, quickly fetch and update balance
+    try {
+      const balanceRes = await window.ipc?.invoke<{
+        balance: number;
+        mode: string;
+      }>("balance:get");
+      if (balanceRes) {
+        setStats((prev) =>
+          prev ? { ...prev, balance: balanceRes.balance } : prev,
+        );
+      }
+    } catch (e) {
+      console.error("Failed to fetch balance:", e);
+    }
+
+    // Then fetch the rest in parallel
     const [positionsRes, statsRes, perfRes] = await Promise.all([
       window.ipc?.invoke<{ positions: Position[] }>("portfolio:get"),
       window.ipc?.invoke<DashboardStats>("stats:get"),
@@ -298,10 +390,23 @@ export default function Tabs({
             />
           )}
           {active?.kind === "portfolio" && (
-            <PortfolioView positions={positions} onSell={refreshData} />
+            <PortfolioView
+              positions={positions}
+              onSell={refreshData}
+              onOptimisticUpdate={(tokenId: string) => {
+                // Immediately remove position from UI (optimistic update)
+                setPositions((prev) =>
+                  prev.filter((p) => p.tokenId !== tokenId),
+                );
+              }}
+            />
           )}
           {active?.kind === "performance" && (
-            <PerformanceView stats={perfStats} trades={trades} />
+            <PerformanceView
+              stats={perfStats}
+              trades={trades}
+              positions={positions}
+            />
           )}
           {active?.kind === "traders" && <TradersView />}
           {active?.kind === "whales" && <WhalesView />}
@@ -654,8 +759,9 @@ function usePriceHistory(tokenId: string | null, enabled: boolean) {
       try {
         // Fetch price history from Polymarket CLOB API
         // Using the timeseries endpoint for token prices
+        // interval=1d gives 24 hours of data, fidelity=5 gives 5-minute resolution
         const response = await fetch(
-          `https://clob.polymarket.com/prices-history?market=${tokenId}&interval=1m&fidelity=60`,
+          `https://clob.polymarket.com/prices-history?market=${tokenId}&interval=1d&fidelity=5`,
           {
             signal: abortControllerRef.current.signal,
             headers: {
@@ -1904,15 +2010,16 @@ function LogRow({ log }: { log: TradeLog }) {
 function PortfolioView({
   positions,
   onSell,
+  onOptimisticUpdate,
 }: {
   positions: Position[];
   onSell: () => void;
+  onOptimisticUpdate?: (tokenId: string) => void;
 }) {
   const [selling, setSelling] = useState<string | null>(null);
   const [redeeming, setRedeeming] = useState<string | null>(null);
 
   const activePositions = positions.filter((p) => p.shares > 0 && !p.settled);
-  const closedPositions = positions.filter((p) => p.shares === 0 || p.settled);
 
   const totalValue = activePositions.reduce(
     (sum, p) => sum + p.currentValue,
@@ -1931,6 +2038,8 @@ function PortfolioView({
         error?: string;
       }>("position:sell", tokenId);
       if (result?.success) {
+        // Optimistic update - immediately remove from UI
+        onOptimisticUpdate?.(tokenId);
         onSell();
       } else {
         console.error("Sell failed:", result?.error);
@@ -1952,7 +2061,9 @@ function PortfolioView({
         error?: string;
       }>("position:redeem", { tokenId, conditionId });
       if (result?.success) {
-        onSell(); // Refresh data
+        // Optimistic update - immediately remove from UI
+        onOptimisticUpdate?.(tokenId);
+        onSell(); // Refresh data in background
       } else {
         console.error("Redeem failed:", result?.error);
       }
@@ -2069,47 +2180,6 @@ function PortfolioView({
           </>
         )}
       </div>
-
-      {/* Closed positions */}
-      {closedPositions.length > 0 && (
-        <div className="panel">
-          <div className="panel-header">
-            <p className="panel-title">Closed Positions</p>
-            <span className="text-sm text-white/40">
-              {closedPositions.length} closed
-            </span>
-          </div>
-          <div className="@container flex items-center px-3 @[400px]:px-4 py-2 border-b border-white/[0.06] bg-white/[0.02]">
-            <div className="flex-1 min-w-0 mr-2 @[400px]:mr-3 @[500px]:mr-4">
-              <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
-                Market
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
-              <div className="w-8 @[400px]:w-10 text-center">
-                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
-                  Side
-                </span>
-              </div>
-              <div className="hidden @[350px]:flex w-12 @[400px]:w-14 justify-center">
-                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
-                  Status
-                </span>
-              </div>
-              <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
-                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
-                  PnL
-                </span>
-              </div>
-            </div>
-          </div>
-          <div className="divide-y divide-white/[0.04] max-h-[300px] overflow-y-auto">
-            {closedPositions.slice(0, 20).map((pos, idx) => (
-              <ClosedPositionRow key={idx} position={pos} />
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -2127,6 +2197,7 @@ function PositionRowWithSell({
   selling: boolean;
   redeeming: boolean;
 }) {
+  console.log("Rendering PositionRow for", position);
   const isUp = position.pnl >= 0;
   const pnlColor = isUp ? "text-emerald-400" : "text-rose-400";
   const isResolved = position.isResolved || position.isRedeemable;
@@ -2165,7 +2236,7 @@ function PositionRowWithSell({
         )}
         <div className="flex flex-col min-w-0">
           <span className="text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] text-white/80 group-hover:text-white truncate transition-colors">
-            {displayMarket}
+            {position.market}
           </span>
           {isResolved && (
             <span className="text-[9px] @[400px]:text-[10px] font-medium text-amber-400/80 uppercase tracking-wider">
@@ -2273,91 +2344,95 @@ function PositionRowWithSell({
   );
 }
 
-function ClosedPositionRow({ position }: { position: Position }) {
-  const pnl = position.settlementPnl ?? position.pnl;
-  const isUp = pnl >= 0;
-  const pnlColor = isUp ? "text-emerald-400" : "text-rose-400";
+// function ClosedPositionRow({ position }: { position: Position }) {
+//   const pnl = position.settlementPnl ?? position.pnl;
+//   const isUp = pnl >= 0;
+//   const pnlColor = isUp ? "text-emerald-400" : "text-rose-400";
 
-  // Use the market name as-is if it looks like a proper question, otherwise format the slug
-  const displayMarket =
-    position.market && position.market.includes("?")
-      ? position.market
-      : formatMarketName(position.market || position.marketSlug);
+//   // Use the market name as-is if it looks like a proper question, otherwise format the slug
+//   const displayMarket =
+//     position.market && position.market.includes("?")
+//       ? position.market
+//       : formatMarketName(position.market || position.marketSlug);
 
-  // Use provided image URL or generate from market slug
-  const imageUrl =
-    position.image ||
-    (position.marketSlug
-      ? `https://polymarket-upload.s3.us-east-2.amazonaws.com/${position.marketSlug}.png`
-      : null);
+//   // Use provided image URL or generate from market slug
+//   const imageUrl =
+//     position.image ||
+//     (position.marketSlug
+//       ? `https://polymarket-upload.s3.us-east-2.amazonaws.com/${position.marketSlug}.png`
+//       : null);
 
-  // Format value compactly
-  const formatValue = (val: number) => {
-    if (Math.abs(val) >= 1000) return `$${(val / 1000).toFixed(1)}K`;
-    return `$${val.toFixed(2)}`;
-  };
+//   // Format value compactly
+//   const formatValue = (val: number) => {
+//     if (Math.abs(val) >= 1000) return `$${(val / 1000).toFixed(1)}K`;
+//     return `$${val.toFixed(2)}`;
+//   };
 
-  return (
-    <div className="@container group flex items-center px-3 @[400px]:px-4 py-2 @[400px]:py-2.5 hover:bg-white/[0.03] transition-colors border-b border-white/[0.04] last:border-0 opacity-70 hover:opacity-100">
-      {/* Market image */}
-      <div className="flex-1 min-w-0 flex items-center gap-2 @[400px]:gap-2.5 @[500px]:gap-3 mr-2 @[400px]:mr-3 @[500px]:mr-4">
-        {imageUrl && (
-          <img
-            alt=""
-            loading="lazy"
-            className="w-6 h-6 @[400px]:w-7 @[400px]:h-7 @[500px]:w-8 @[500px]:h-8 rounded object-cover flex-shrink-0 opacity-60 group-hover:opacity-80 transition-opacity grayscale"
-            src={imageUrl}
-          />
-        )}
-        <span className="text-[11px] @[400px]:text-[12px] @[500px]:text-[13px] text-white/60 group-hover:text-white/80 truncate transition-colors">
-          {displayMarket}
-        </span>
-      </div>
+//   return (
+//     <div className="@container group flex items-center px-3 @[400px]:px-4 py-2 @[400px]:py-2.5 hover:bg-white/[0.03] transition-colors border-b border-white/[0.04] last:border-0 opacity-70 hover:opacity-100">
+//       {/* Market image */}
+//       <div className="flex-1 min-w-0 flex items-center gap-2 @[400px]:gap-2.5 @[500px]:gap-3 mr-2 @[400px]:mr-3 @[500px]:mr-4">
+//         {imageUrl && (
+//           <img
+//             alt=""
+//             loading="lazy"
+//             className="w-6 h-6 @[400px]:w-7 @[400px]:h-7 @[500px]:w-8 @[500px]:h-8 rounded object-cover flex-shrink-0 opacity-60 group-hover:opacity-80 transition-opacity grayscale"
+//             src={imageUrl}
+//           />
+//         )}
+//         <span className="text-[11px] @[400px]:text-[12px] @[500px]:text-[13px] text-white/60 group-hover:text-white/80 truncate transition-colors">
+//           {displayMarket}
+//         </span>
+//       </div>
 
-      {/* Right side info */}
-      <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
-        {/* Outcome badge */}
-        <div className="w-8 @[400px]:w-10 flex items-center justify-center">
-          <span
-            className={`text-[9px] @[400px]:text-[10px] @[500px]:text-[11px] font-bold px-1 @[400px]:px-1.5 py-0.5 ${
-              position.outcome === "Yes"
-                ? "bg-emerald-500/10 text-emerald-400/60"
-                : "bg-rose-500/10 text-rose-300/60"
-            }`}
-          >
-            {position.outcome?.toUpperCase() || "—"}
-          </span>
-        </div>
+//       {/* Right side info */}
+//       <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
+//         {/* Outcome badge */}
+//         <div className="w-8 @[400px]:w-10 flex items-center justify-center">
+//           <span
+//             className={`text-[9px] @[400px]:text-[10px] @[500px]:text-[11px] font-bold px-1 @[400px]:px-1.5 py-0.5 ${
+//               position.outcome === "Yes"
+//                 ? "bg-emerald-500/10 text-emerald-400/60"
+//                 : "bg-rose-500/10 text-rose-300/60"
+//             }`}
+//           >
+//             {position.outcome?.toUpperCase() || "—"}
+//           </span>
+//         </div>
 
-        {/* Closed badge */}
-        <div className="hidden @[350px]:flex w-12 @[400px]:w-14 items-center justify-center">
-          <span className="text-[9px] @[400px]:text-[10px] @[500px]:text-[11px] font-medium px-1 @[400px]:px-1.5 py-0.5 bg-white/5 text-white/30">
-            CLOSED
-          </span>
-        </div>
+//         {/* Closed badge */}
+//         <div className="hidden @[350px]:flex w-12 @[400px]:w-14 items-center justify-center">
+//           <span className="text-[9px] @[400px]:text-[10px] @[500px]:text-[11px] font-medium px-1 @[400px]:px-1.5 py-0.5 bg-white/5 text-white/30">
+//             CLOSED
+//           </span>
+//         </div>
 
-        {/* PnL */}
-        <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
-          <span
-            className={`text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums ${pnlColor}`}
-          >
-            {pnl >= 0 ? "+" : ""}
-            {formatValue(pnl)}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
+//         {/* PnL */}
+//         <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
+//           <span
+//             className={`text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums ${pnlColor}`}
+//           >
+//             {pnl >= 0 ? "+" : ""}
+//             {formatValue(pnl)}
+//           </span>
+//         </div>
+//       </div>
+//     </div>
+//   );
+// }
 
 // ========== Performance View ==========
 function PerformanceView({
   stats,
   trades,
+  positions,
 }: {
   stats: PerformanceStats | null;
   trades: TradeRecord[];
+  positions: Position[];
 }) {
+  // Filter closed positions
+  const closedPositions = positions.filter((p) => p.shares === 0 || p.settled);
   const [liveUnrealizedPnl, setLiveUnrealizedPnl] = useState(0);
   const [chartHistory, setChartHistory] = useState<
     { timestamp: number; pnl: number; balance: number }[]
@@ -2409,6 +2484,23 @@ function PerformanceView({
     // Refresh history every 60 seconds (increased from 30s)
     const interval = setInterval(fetchHistory, 60000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Record chart snapshots every minute for better chart resolution
+  useEffect(() => {
+    const recordSnapshot = async () => {
+      try {
+        await window.ipc?.invoke("chart:recordSnapshot");
+      } catch (e) {
+        // Silently fail - snapshot recording is best-effort
+      }
+    };
+
+    // Record first snapshot immediately
+    recordSnapshot();
+    // Then record every 60 seconds for minute-by-minute chart data
+    const snapshotInterval = setInterval(recordSnapshot, 60000);
+    return () => clearInterval(snapshotInterval);
   }, []);
 
   const formatTime = (ts: number) => {
@@ -2713,6 +2805,47 @@ function PerformanceView({
           </>
         )}
       </div>
+
+      {/* Closed Positions */}
+      {/* {closedPositions.length > 0 && (
+        <div className="panel">
+          <div className="panel-header">
+            <p className="panel-title">Closed Positions</p>
+            <span className="text-sm text-white/40">
+              {closedPositions.length} realized
+            </span>
+          </div>
+          <div className="@container flex items-center px-3 @[400px]:px-4 py-2 border-b border-white/[0.06] bg-white/[0.02]">
+            <div className="flex-1 min-w-0 mr-2 @[400px]:mr-3 @[500px]:mr-4">
+              <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                Market
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
+              <div className="w-8 @[400px]:w-10 flex items-center justify-center">
+                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                  Bet
+                </span>
+              </div>
+              <div className="hidden @[350px]:flex w-12 @[400px]:w-14 items-center justify-center">
+                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                  Status
+                </span>
+              </div>
+              <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
+                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
+                  PnL
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="divide-y divide-white/[0.04] max-h-[300px] overflow-y-auto">
+            {closedPositions.slice(0, 20).map((pos, idx) => (
+              <ClosedPositionRow key={idx} position={pos} />
+            ))}
+          </div>
+        </div>
+      )} */}
     </div>
   );
 }

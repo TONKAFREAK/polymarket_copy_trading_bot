@@ -936,18 +936,23 @@ ipcMain.handle("portfolio:get", async () => {
     try {
       const liveData = await botService?.getLiveStats();
       if (liveData && liveData.positions) {
-        console.log(`[portfolio:get] Got ${liveData.positions.length} positions from getLiveStats`);
+        console.log(
+          `[portfolio:get] Got ${liveData.positions.length} positions from getLiveStats`,
+        );
 
         // Log resolved positions for debugging
-        const resolvedPositions = liveData.positions.filter((p: any) => p.isResolved || p.isRedeemable);
+        const resolvedPositions = liveData.positions.filter(
+          (p: any) => p.isResolved || p.isRedeemable,
+        );
         if (resolvedPositions.length > 0) {
-          console.log(`[portfolio:get] Found ${resolvedPositions.length} resolved position(s):`,
+          console.log(
+            `[portfolio:get] Found ${resolvedPositions.length} resolved position(s):`,
             resolvedPositions.map((p: any) => ({
               tokenId: p.tokenId?.substring(0, 16),
               isResolved: p.isResolved,
               isRedeemable: p.isRedeemable,
-              conditionId: p.conditionId?.substring(0, 16)
-            }))
+              conditionId: p.conditionId?.substring(0, 16),
+            })),
           );
         }
 
@@ -969,7 +974,11 @@ ipcMain.handle("portfolio:get", async () => {
               : undefined);
 
           // Use currentPrice from API if available
-          const currentPrice = pos.currentPrice || (pos.shares > 0 ? pos.currentValue / pos.shares : pos.avgEntryPrice);
+          const currentPrice =
+            pos.currentPrice ||
+            (pos.shares > 0
+              ? pos.currentValue / pos.shares
+              : pos.avgEntryPrice);
           const currentValue = pos.currentValue || pos.shares * currentPrice;
           const costBasis = pos.avgEntryPrice * pos.shares;
           const pnl = currentValue - costBasis;
@@ -1001,33 +1010,42 @@ ipcMain.handle("portfolio:get", async () => {
         const activePositions = positions.filter((p: any) => p.shares > 0);
 
         // Add closed positions with realized PnL
-        const closedPositions = (liveData.closedPositions || []).map((pos: any) => {
-          const meta = pos.tokenId ? tokenIdToMetaCache.get(pos.tokenId) : null;
-          const marketName = meta?.question || meta?.title || pos.market || "Unknown Market";
-          const imageUrl = meta?.image || undefined;
 
-          return {
-            tokenId: pos.tokenId,
-            outcome: pos.outcome || "YES",
-            shares: 0,
-            avgEntryPrice: pos.avgEntryPrice || 0,
-            currentValue: 0,
-            currentPrice: pos.avgExitPrice || 0,
-            market: marketName,
-            side: "SELL",
-            pnl: pos.pnl || 0,
-            settlementPnl: pos.settlementPnl || pos.pnl || 0,
-            pnlPercent: pos.avgEntryPrice > 0
-              ? ((pos.avgExitPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100
-              : 0,
-            totalCost: 0,
-            openedAt: pos.closedAt || Date.now(),
-            isResolved: true,
-            isRedeemable: false,
-            settled: true,
-            image: imageUrl,
-          };
-        });
+        const closedPositions = (liveData.closedPositions || []).map(
+          (pos: any) => {
+            const meta = pos.tokenId
+              ? tokenIdToMetaCache.get(pos.tokenId)
+              : null;
+            const marketName =
+              meta?.question || meta?.title || pos.market || "Unknown Market";
+            const imageUrl = meta?.image || undefined;
+
+            return {
+              tokenId: pos.tokenId,
+              outcome: pos.outcome || "YES",
+              shares: 0,
+              avgEntryPrice: pos.avgEntryPrice || 0,
+              currentValue: 0,
+              currentPrice: pos.avgExitPrice || 0,
+              market: marketName,
+              side: "SELL",
+              pnl: pos.pnl || 0,
+              settlementPnl: pos.settlementPnl || pos.pnl || 0,
+              pnlPercent:
+                pos.avgEntryPrice > 0
+                  ? ((pos.avgExitPrice - pos.avgEntryPrice) /
+                      pos.avgEntryPrice) *
+                    100
+                  : 0,
+              totalCost: 0,
+              openedAt: pos.closedAt || Date.now(),
+              isResolved: true,
+              isRedeemable: false,
+              settled: true,
+              image: imageUrl,
+            };
+          },
+        );
 
         return { positions: [...activePositions, ...closedPositions] };
       }
@@ -1260,15 +1278,19 @@ ipcMain.handle("performance:get", async () => {
         const winRate = liveData.winRate || 0;
 
         // Calculate average win/loss from totals
-        const avgWin = winningTradesCount > 0 && realizedPnl > 0
-          ? Math.max(0, realizedPnl) / winningTradesCount
-          : 0;
-        const avgLoss = losingTradesCount > 0 && realizedPnl < 0
-          ? Math.abs(Math.min(0, realizedPnl)) / losingTradesCount
-          : 0;
+        const avgWin =
+          winningTradesCount > 0 && realizedPnl > 0
+            ? Math.max(0, realizedPnl) / winningTradesCount
+            : 0;
+        const avgLoss =
+          losingTradesCount > 0 && realizedPnl < 0
+            ? Math.abs(Math.min(0, realizedPnl)) / losingTradesCount
+            : 0;
 
         // Use starting balance from live data, or calculate it
-        const startingBalance = liveData.startingBalance || (currentBalance + positionsValue - totalPnl);
+        const startingBalance =
+          liveData.startingBalance ||
+          currentBalance + positionsValue - totalPnl;
         const returns =
           startingBalance > 0
             ? ((currentBalance + positionsValue - startingBalance) /
@@ -1683,38 +1705,56 @@ ipcMain.handle(
               const priceData = await client.getPrice(tokenId, "SELL");
               if (priceData && priceData.price) {
                 sellPrice = parseFloat(priceData.price);
-                console.log(`[position:sell] Got best bid price: $${sellPrice}`);
+                console.log(
+                  `[position:sell] Got best bid price: $${sellPrice}`,
+                );
               }
 
               // If no price from getPrice, try orderbook
               if (!sellPrice || sellPrice <= 0) {
                 try {
                   const orderbook = await client.getOrderBook(tokenId);
-                  if (orderbook && orderbook.bids && orderbook.bids.length > 0) {
+                  if (
+                    orderbook &&
+                    orderbook.bids &&
+                    orderbook.bids.length > 0
+                  ) {
                     const bestBid = orderbook.bids[0];
                     sellPrice = parseFloat(bestBid.price);
-                    console.log(`[position:sell] Got best bid from orderbook: $${sellPrice}`);
+                    console.log(
+                      `[position:sell] Got best bid from orderbook: $${sellPrice}`,
+                    );
                   }
                 } catch (obError) {
-                  console.log(`[position:sell] Could not fetch orderbook: ${(obError as Error).message}`);
+                  console.log(
+                    `[position:sell] Could not fetch orderbook: ${(obError as Error).message}`,
+                  );
                 }
               }
             }
           } catch (priceError) {
-            console.log(`[position:sell] Could not fetch price: ${(priceError as Error).message}`);
+            console.log(
+              `[position:sell] Could not fetch price: ${(priceError as Error).message}`,
+            );
           }
 
           // Fallback: use position's avg entry price if we couldn't get market price
           if (!sellPrice || sellPrice <= 0) {
             // Try to get position info to use entry price as fallback
             const liveData = await botService?.getLiveStats();
-            const position = liveData?.positions?.find((p: any) => p.tokenId === tokenId);
+            const position = liveData?.positions?.find(
+              (p: any) => p.tokenId === tokenId,
+            );
             if (position && position.avgEntryPrice > 0) {
               sellPrice = position.avgEntryPrice;
-              console.log(`[position:sell] Using entry price as fallback: $${sellPrice}`);
+              console.log(
+                `[position:sell] Using entry price as fallback: $${sellPrice}`,
+              );
             } else {
               sellPrice = 0.5; // Last resort fallback
-              console.log(`[position:sell] Using default fallback price: $${sellPrice}`);
+              console.log(
+                `[position:sell] Using default fallback price: $${sellPrice}`,
+              );
             }
           }
         }
@@ -1918,9 +1958,9 @@ ipcMain.handle(
         if (result.success) {
           console.log(`[position:redeem] SUCCESS: txHash=${result.txHash}`);
 
-          // Clear position caches so UI updates immediately
+          // Clear ALL caches (positions + balance) so UI updates immediately
           clobClient.invalidatePositionCache(tokenId);
-          clobClient.clearPositionCaches();
+          clobClient.clearAllCaches();
 
           // Add log entry
           addLog({
@@ -2517,6 +2557,218 @@ ipcMain.handle(
   },
 );
 
+// Fetch P&L history for the current active account
+// Uses the correct address based on signature type:
+// - EOA (type 0): Use wallet address directly
+// - Magic/Email (type 1): Use polyFunderAddress (proxy wallet)
+// - Browser wallet (type 2): Use polyFunderAddress (Gnosis Safe proxy)
+ipcMain.handle(
+  "polymarket:getMyPnl",
+  async (
+    _event,
+    options: {
+      interval?: string; // "1d", "1w", "1m", "3m", "1y", "all"
+      fidelity?: string; // "1h", "4h", "1d", "1w"
+    },
+  ) => {
+    try {
+      const accountsState = loadAccountsState();
+
+      // Check if we have an active account
+      if (!accountsState.activeAccountId) {
+        console.log("[MyPnl] No active account, returning null");
+        return null;
+      }
+
+      const activeAccount = accountsState.accounts.find(
+        (acc) => acc.id === accountsState.activeAccountId,
+      );
+
+      if (!activeAccount) {
+        console.log("[MyPnl] Active account not found");
+        return null;
+      }
+
+      // Determine which address to use based on signature type
+      // For proxy wallets (type 1 and 2), use the funder address
+      // For EOA (type 0), use the wallet address
+      const signatureType = activeAccount.signatureType ?? 0;
+      let pnlAddress: string;
+
+      if (signatureType === 0) {
+        // EOA - use wallet address directly
+        pnlAddress = activeAccount.address;
+      } else {
+        // Proxy wallet - use funder address (the Polymarket proxy/deposit address)
+        if (!activeAccount.polyFunderAddress) {
+          console.error("[MyPnl] Proxy account missing funder address");
+          return null;
+        }
+        pnlAddress = activeAccount.polyFunderAddress;
+      }
+
+      console.log(
+        `[MyPnl] Using address for PnL: ${pnlAddress} (type: ${signatureType})`,
+      );
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      // Map intervals to API intervals
+      // Valid API intervals per user: 'max', 'all', '1m', '1w', '1d', '12h', '6h'
+      const intervalMap: Record<string, string> = {
+        "6h": "6h",
+        "12h": "12h",
+        "1d": "1d",
+        "1w": "1w",
+        "1m": "1m",
+        "3m": "max", // Use 'max' for longer periods
+        "1y": "max",
+        all: "max", // 'max' is the correct API value for all-time
+        max: "max",
+      };
+
+      // Determine fidelity based on interval
+      // Valid API fidelity values per user: '1d', '18h', '12h', '3h', '1h'
+      const fidelityMap: Record<string, string> = {
+        "6h": "1h", // 6 hours: hourly data points
+        "12h": "1h", // 12 hours: hourly data points
+        "1d": "1h", // 1 day: hourly data points (24 points)
+        "1w": "3h", // 1 week: 3-hour data points (~56 points)
+        "1m": "12h", // 1 month: 12-hour data points (~60 points)
+        "3m": "1d", // 3 months: daily data points (~90 points)
+        "1y": "1d", // 1 year: daily data points
+        all: "1d", // All time: daily data points
+        max: "1d", // Max: daily data points
+      };
+
+      const interval = intervalMap[options.interval || "all"] || "max";
+      const fidelity =
+        options.fidelity || fidelityMap[options.interval || "all"] || "1d";
+
+      const url = `https://user-pnl-api.polymarket.com/user-pnl?user_address=${pnlAddress}&interval=${interval}&fidelity=${fidelity}`;
+      console.log(
+        `[MyPnl] Fetching: ${url} (requested: interval=${options.interval})`,
+      );
+
+      const response = await fetch(url, {
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        console.error("[MyPnl] Error:", response.status, response.statusText);
+        return null;
+      }
+
+      const data = await response.json();
+      console.log(
+        `[MyPnl] Received ${Array.isArray(data) ? data.length : 0} data points for interval ${interval}`,
+      );
+
+      return {
+        data,
+        address: pnlAddress,
+        signatureType,
+        interval,
+        fidelity,
+      };
+    } catch (e) {
+      console.error("[MyPnl] Failed:", e);
+      return null;
+    }
+  },
+);
+
+// Fetch closed positions from Polymarket data-api
+// API: https://data-api.polymarket.com/closed-positions
+// Returns detailed trade history with realized PnL
+ipcMain.handle(
+  "polymarket:getClosedPositions",
+  async (
+    _event,
+    options: {
+      sortBy?: string; // "realizedpnl", "timestamp"
+      sortDirection?: string; // "ASC", "DESC"
+      limit?: number;
+      offset?: number;
+    },
+  ) => {
+    try {
+      const accountsState = loadAccountsState();
+
+      if (!accountsState.activeAccountId) {
+        console.log("[ClosedPositions] No active account");
+        return { positions: [], total: 0 };
+      }
+
+      const activeAccount = accountsState.accounts.find(
+        (acc) => acc.id === accountsState.activeAccountId,
+      );
+
+      if (!activeAccount) {
+        console.log("[ClosedPositions] Active account not found");
+        return { positions: [], total: 0 };
+      }
+
+      // Use proxy/funder address for non-EOA accounts
+      const signatureType = activeAccount.signatureType ?? 0;
+      const userAddress = activeAccount.polyFunderAddress;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      const params = new URLSearchParams();
+      params.set("user", userAddress);
+      params.set("sortBy", options.sortBy || "timestamp");
+      params.set("sortDirection", options.sortDirection || "DESC");
+      params.set("limit", String(options.limit || 50));
+      params.set("offset", String(options.offset || 0));
+
+      const url = `https://data-api.polymarket.com/closed-positions?${params.toString()}`;
+      console.log("[ClosedPositions] Fetching:", url);
+
+      const response = await fetch(url, {
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        console.error(
+          "[ClosedPositions] Error:",
+          response.status,
+          response.statusText,
+        );
+        return { positions: [], total: 0 };
+      }
+
+      const data = await response.json();
+      console.log(
+        `[ClosedPositions] Got ${Array.isArray(data) ? data.length : 0} closed positions`,
+      );
+
+      return {
+        positions: Array.isArray(data) ? data : [],
+        total: Array.isArray(data) ? data.length : 0,
+        address: userAddress,
+      };
+    } catch (e) {
+      console.error("[ClosedPositions] Failed:", e);
+      return { positions: [], total: 0 };
+    }
+  },
+);
+
 // Fetch leaderboard from data-api (CORS-free)
 // API: https://data-api.polymarket.com/v1/leaderboard
 // Params: category (OVERALL, POLITICS, SPORTS, CRYPTO, CULTURE, etc.)
@@ -2919,15 +3171,19 @@ ipcMain.handle(
 
 // ========== Account Management IPC Handlers ==========
 
+// Signature types: 0 = EOA, 1 = Magic/Email proxy, 2 = Browser wallet proxy (Gnosis Safe)
+type SignatureType = 0 | 1 | 2;
+
 interface LiveAccount {
   id: string;
   name: string;
-  address: string;
+  address: string; // Signer wallet address (from private key)
   privateKey: string;
   polyApiKey: string;
   polyApiSecret: string;
   polyPassphrase: string;
-  polyFunderAddress?: string;
+  polyFunderAddress?: string; // Proxy wallet address (required for types 1 and 2)
+  signatureType?: SignatureType; // 0 = EOA (default), 1 = Magic/Email, 2 = Browser wallet
   createdAt: number;
   lastUsedAt?: number;
 }
@@ -3062,6 +3318,7 @@ ipcMain.handle(
       polyApiSecret: string;
       polyPassphrase: string;
       polyFunderAddress?: string;
+      signatureType?: number; // 0 = EOA, 1 = Magic/Email proxy, 2 = Browser wallet proxy
     },
   ) => {
     try {
@@ -3071,6 +3328,21 @@ ipcMain.handle(
       const address = await deriveAddressFromPrivateKey(accountData.privateKey);
       if (!address) {
         return { success: false, error: "Invalid private key" };
+      }
+
+      // Validate signature type
+      const signatureType = accountData.signatureType ?? 0;
+      if (signatureType !== 0 && signatureType !== 1 && signatureType !== 2) {
+        return { success: false, error: "Invalid signature type" };
+      }
+
+      // For proxy wallet types (1 and 2), funder address is required
+      if (signatureType !== 0 && !accountData.polyFunderAddress) {
+        return {
+          success: false,
+          error:
+            "Proxy wallet address is required for Magic/Email and Browser wallet accounts",
+        };
       }
 
       // Check if account with this address already exists
@@ -3096,6 +3368,7 @@ ipcMain.handle(
         polyApiSecret: accountData.polyApiSecret,
         polyPassphrase: accountData.polyPassphrase,
         polyFunderAddress: accountData.polyFunderAddress,
+        signatureType: signatureType as 0 | 1 | 2,
         createdAt: Date.now(),
       };
 
@@ -3214,8 +3487,12 @@ ipcMain.handle("accounts:switch", async (_event, accountId: string | null) => {
       updateEnvKey("POLY_API_KEY", account.polyApiKey);
       updateEnvKey("POLY_API_SECRET", account.polyApiSecret);
       updateEnvKey("POLY_PASSPHRASE", account.polyPassphrase);
+      updateEnvKey("POLY_SIGNATURE_TYPE", String(account.signatureType ?? 0));
       if (account.polyFunderAddress) {
         updateEnvKey("POLY_FUNDER_ADDRESS", account.polyFunderAddress);
+      } else {
+        // Clear funder address if not set (for EOA accounts)
+        updateEnvKey("POLY_FUNDER_ADDRESS", "");
       }
 
       fs.writeFileSync(envFile, content, "utf-8");

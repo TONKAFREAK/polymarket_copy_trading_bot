@@ -26,6 +26,14 @@ interface DebugLog {
   message: string;
 }
 
+// Signature type constants
+type SignatureType = 0 | 1 | 2;
+const SIGNATURE_TYPES = {
+  EOA: 0 as SignatureType,
+  POLY_PROXY: 1 as SignatureType,
+  GNOSIS_SAFE: 2 as SignatureType,
+};
+
 // Add Account Modal - for adding new live trading accounts
 function AddAccountModal({
   onClose,
@@ -35,6 +43,7 @@ function AddAccountModal({
   onSave: (account: AccountInfo) => void;
 }) {
   const [accountName, setAccountName] = useState("");
+  const [signatureType, setSignatureType] = useState<SignatureType>(0);
   const [privateKey, setPrivateKey] = useState("");
   const [polyApiKey, setPolyApiKey] = useState("");
   const [polyApiSecret, setPolyApiSecret] = useState("");
@@ -42,6 +51,9 @@ function AddAccountModal({
   const [polyFunderAddress, setPolyFunderAddress] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Check if funder address is required based on signature type
+  const funderRequired = signatureType !== 0;
 
   const handleSave = async () => {
     if (!privateKey.trim()) {
@@ -60,6 +72,10 @@ function AddAccountModal({
       setError("Passphrase is required");
       return;
     }
+    if (funderRequired && !polyFunderAddress.trim()) {
+      setError("Proxy wallet address is required for this account type");
+      return;
+    }
 
     setSaving(true);
     setError(null);
@@ -76,6 +92,7 @@ function AddAccountModal({
         polyApiSecret: polyApiSecret.trim(),
         polyPassphrase: polyPassphrase.trim(),
         polyFunderAddress: polyFunderAddress.trim() || undefined,
+        signatureType,
       });
 
       if (result?.success && result.account) {
@@ -150,6 +167,80 @@ function AddAccountModal({
 
           <div className="space-y-2">
             <label className="block text-sm text-white/70">
+              Account Type <span className="text-rose-400">*</span>
+            </label>
+            <div className="space-y-2">
+              <label
+                className={`flex items-start gap-3 p-3 border rounded cursor-pointer transition-colors ${
+                  signatureType === 0
+                    ? "bg-emerald-500/10 border-emerald-500/50"
+                    : "bg-white/[0.02] border-white/10 hover:border-white/20"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="signatureType"
+                  checked={signatureType === 0}
+                  onChange={() => setSignatureType(0)}
+                  className="mt-1 accent-emerald-500"
+                />
+                <div>
+                  <p className="text-white text-sm font-medium">EOA Wallet (Direct)</p>
+                  <p className="text-white/50 text-xs mt-0.5">
+                    Standard Ethereum wallet. Trade directly from your wallet without a proxy.
+                    You pay your own gas fees.
+                  </p>
+                </div>
+              </label>
+              <label
+                className={`flex items-start gap-3 p-3 border rounded cursor-pointer transition-colors ${
+                  signatureType === 1
+                    ? "bg-emerald-500/10 border-emerald-500/50"
+                    : "bg-white/[0.02] border-white/10 hover:border-white/20"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="signatureType"
+                  checked={signatureType === 1}
+                  onChange={() => setSignatureType(1)}
+                  className="mt-1 accent-emerald-500"
+                />
+                <div>
+                  <p className="text-white text-sm font-medium">Magic Link / Email Login</p>
+                  <p className="text-white/50 text-xs mt-0.5">
+                    For accounts created via email login on Polymarket.com.
+                    Uses a proxy wallet - Polymarket pays gas fees.
+                  </p>
+                </div>
+              </label>
+              <label
+                className={`flex items-start gap-3 p-3 border rounded cursor-pointer transition-colors ${
+                  signatureType === 2
+                    ? "bg-emerald-500/10 border-emerald-500/50"
+                    : "bg-white/[0.02] border-white/10 hover:border-white/20"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="signatureType"
+                  checked={signatureType === 2}
+                  onChange={() => setSignatureType(2)}
+                  className="mt-1 accent-emerald-500"
+                />
+                <div>
+                  <p className="text-white text-sm font-medium">Browser Wallet (Metamask, etc.)</p>
+                  <p className="text-white/50 text-xs mt-0.5">
+                    For accounts connected via Metamask, Coinbase Wallet, etc.
+                    Uses a Gnosis Safe proxy - Polymarket pays gas fees.
+                  </p>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-sm text-white/70">
               Private Key <span className="text-rose-400">*</span>
             </label>
             <input
@@ -205,17 +296,28 @@ function AddAccountModal({
 
           <div className="space-y-2">
             <label className="block text-sm text-white/70">
-              Funder Address <span className="text-white/30">(optional)</span>
+              Proxy Wallet Address{" "}
+              {funderRequired ? (
+                <span className="text-rose-400">*</span>
+              ) : (
+                <span className="text-white/30">(optional)</span>
+              )}
             </label>
             <input
               type="text"
               value={polyFunderAddress}
               onChange={(e) => setPolyFunderAddress(e.target.value)}
-              placeholder="0x... (leave empty to use wallet address)"
+              placeholder={
+                funderRequired
+                  ? "0x... (your Polymarket deposit address)"
+                  : "0x... (leave empty for EOA)"
+              }
               className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/10 rounded text-white placeholder-white/30 focus:outline-none focus:border-emerald-500/50 font-mono text-sm"
             />
             <p className="text-xs text-white/40">
-              Your Polymarket profile address (if different from wallet)
+              {funderRequired
+                ? "The address you deposit USDC to on Polymarket. Find it on your Polymarket profile or at reveal.polymarket.com"
+                : "Leave empty for EOA wallets. Only needed for proxy wallet setups."}
             </p>
           </div>
 

@@ -196,16 +196,25 @@ export interface WalletStatus {
 // ACCOUNT MANAGEMENT TYPES
 // ============================================
 
+// Signature types for Polymarket authentication
+export type SignatureType = 0 | 1 | 2;
+export const SIGNATURE_TYPES = {
+  EOA: 0 as SignatureType, // Direct EOA wallet (no proxy)
+  POLY_PROXY: 1 as SignatureType, // Magic Link/Email login proxy wallet
+  GNOSIS_SAFE: 2 as SignatureType, // Browser wallet proxy (Metamask, Coinbase Wallet, etc.)
+} as const;
+
 // Represents a live trading account
 export interface LiveAccount {
   id: string; // Unique identifier
   name: string; // User-friendly name
-  address: string; // Wallet address
+  address: string; // Signer wallet address (from private key)
   privateKey: string; // Encrypted or raw private key
   polyApiKey: string;
   polyApiSecret: string;
   polyPassphrase: string;
-  polyFunderAddress?: string;
+  polyFunderAddress?: string; // Proxy wallet address (required for POLY_PROXY and GNOSIS_SAFE)
+  signatureType: SignatureType; // 0 = EOA, 1 = Magic/Email proxy, 2 = Browser wallet proxy
   createdAt: number;
   lastUsedAt?: number;
 }

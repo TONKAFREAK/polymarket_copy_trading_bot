@@ -1379,19 +1379,25 @@ function formatMarketName(slug?: string): string {
 /**
  * Performance Chart Component - Robinhood-style chart with time range selector
  */
-type TimeRange = "1D" | "1W" | "1M" | "3M" | "1Y" | "ALL";
+type TimeRange = "1D" | "1W" | "1M" | "ALL";
 
 function PerformanceChart({
   data,
   startingBalance,
+  hideTimeControls = false,
+  showPnlValues = false,
+  onHover,
 }: {
   data: { timestamp: number; pnl: number; balance: number }[];
   startingBalance: number;
+  hideTimeControls?: boolean; // Hide internal time range buttons when externally controlled
+  showPnlValues?: boolean; // Show PnL on Y-axis instead of balance
+  onHover?: (hoverData: { pnl: number; timestamp: number } | null) => void; // Callback for hover state
 }) {
   const [hoverData, setHoverData] = useState<{
     x: number;
     y: number;
-    balance: number;
+    value: number; // Either balance or pnl depending on mode
     timestamp: number;
     percentChange: number;
   } | null>(null);
@@ -1405,16 +1411,31 @@ function PerformanceChart({
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
 
-  // Filter data based on selected time range
+  // Filter data based on selected time range (skip if externally controlled)
   const filteredData = useMemo(() => {
     if (!data.length) return [];
+
+    // If time controls are hidden, use data as-is (already filtered by API)
+    if (hideTimeControls) {
+      // Just downsample if needed
+      if (data.length > 150) {
+        const step = Math.ceil(data.length / 150);
+        const downsampled: typeof data = [data[0]];
+        for (let i = step; i < data.length - 1; i += step) {
+          downsampled.push(data[i]);
+        }
+        downsampled.push(data[data.length - 1]);
+        return downsampled;
+      }
+      return data;
+    }
+
     const now = Date.now();
     const ranges: Record<TimeRange, number> = {
       "1D": 24 * 60 * 60 * 1000,
       "1W": 7 * 24 * 60 * 60 * 1000,
       "1M": 30 * 24 * 60 * 60 * 1000,
-      "3M": 90 * 24 * 60 * 60 * 1000,
-      "1Y": 365 * 24 * 60 * 60 * 1000,
+
       ALL: Infinity,
     };
     const cutoff = now - ranges[timeRange];
@@ -1437,14 +1458,14 @@ function PerformanceChart({
     }
 
     return filtered;
-  }, [data, timeRange]);
+  }, [data, timeRange, hideTimeControls]);
 
-  // Calculate chart metrics
+  // Calculate chart metrics - uses PnL or Balance based on showPnlValues
   const chartMetrics = useMemo(() => {
     if (!filteredData.length || filteredData.length < 2) {
       return {
-        currentBalance: startingBalance,
-        startBalance: startingBalance,
+        currentValue: showPnlValues ? 0 : startingBalance,
+        startValue: showPnlValues ? 0 : startingBalance,
         totalChange: 0,
         percentChange: 0,
         isPositive: true,
@@ -1457,27 +1478,36 @@ function PerformanceChart({
       };
     }
 
-    const currentBalance = filteredData[filteredData.length - 1].balance;
-    const startBalance = filteredData[0].balance;
-    const totalChange = currentBalance - startBalance;
-    const percentChange =
-      startBalance > 0 ? (totalChange / startBalance) * 100 : 0;
+    // Use pnl or balance based on mode
+    const getValue = (d: (typeof filteredData)[0]) =>
+      showPnlValues ? d.pnl : d.balance;
+
+    const currentValue = getValue(filteredData[filteredData.length - 1]);
+    const startValue = getValue(filteredData[0]);
+    const totalChange = currentValue - startValue;
+
+    // For PnL mode, show absolute change; for balance mode, show percentage
+    const percentChange = showPnlValues
+      ? 0 // PnL mode doesn't need percentage
+      : startValue > 0
+        ? (totalChange / startValue) * 100
+        : 0;
     const isPositive = totalChange >= 0;
 
-    const balanceValues = filteredData.map((d) => d.balance);
-    const minBalance = Math.min(...balanceValues);
-    const maxBalance = Math.max(...balanceValues);
-    const rangePadding = (maxBalance - minBalance) * 0.15 || 10;
-    const range = maxBalance - minBalance + rangePadding * 2 || 1;
-    const adjustedMin = minBalance - rangePadding;
+    const values = filteredData.map(getValue);
+    const minValue = Math.min(...values);
+    const maxValue = Math.max(...values);
+    const rangePadding = (maxValue - minValue) * 0.15 || 10;
+    const range = maxValue - minValue + rangePadding * 2 || 1;
+    const adjustedMin = minValue - rangePadding;
 
     const minTime = filteredData[0].timestamp;
     const maxTime = filteredData[filteredData.length - 1].timestamp;
     const timeRangeMs = maxTime - minTime || 1;
 
     return {
-      currentBalance,
-      startBalance,
+      currentValue,
+      startValue,
       totalChange,
       percentChange,
       isPositive,
@@ -1488,13 +1518,17 @@ function PerformanceChart({
       range,
       hasData: true,
     };
-  }, [filteredData, startingBalance]);
+  }, [filteredData, startingBalance, showPnlValues]);
 
   // Generate smooth SVG path
   const { linePath, areaPath } = useMemo(() => {
     if (!chartMetrics.hasData) return { linePath: "", areaPath: "" };
 
     const { minTime, timeRangeMs, adjustedMin, range } = chartMetrics;
+
+    // Use pnl or balance based on mode
+    const getValue = (d: (typeof filteredData)[0]) =>
+      showPnlValues ? d.pnl : d.balance;
 
     const points: { x: number; y: number }[] = [];
 
@@ -1504,7 +1538,7 @@ function PerformanceChart({
       const y =
         padding.top +
         chartHeight -
-        ((d.balance - adjustedMin) / range) * chartHeight;
+        ((getValue(d) - adjustedMin) / range) * chartHeight;
       if (!isNaN(x) && !isNaN(y)) {
         points.push({ x, y });
       }
@@ -1524,7 +1558,7 @@ function PerformanceChart({
     const area = `${path} L ${lastPoint.x.toFixed(2)} ${height - padding.bottom} L ${firstPoint.x.toFixed(2)} ${height - padding.bottom} Z`;
 
     return { linePath: path, areaPath: area };
-  }, [filteredData, chartMetrics, chartWidth, chartHeight]);
+  }, [filteredData, chartMetrics, chartWidth, chartHeight, showPnlValues]);
 
   // Handle mouse move - Robinhood style (just vertical line, value shown at top)
   const handleMouseMove = useCallback(
@@ -1532,9 +1566,13 @@ function PerformanceChart({
       if (!svgRef.current || !filteredData.length || !chartMetrics.hasData)
         return;
 
-      const { minTime, timeRangeMs, adjustedMin, range, startBalance } =
+      const { minTime, timeRangeMs, adjustedMin, range, startValue } =
         chartMetrics;
       const svg = svgRef.current;
+
+      // Use pnl or balance based on mode
+      const getValue = (d: (typeof filteredData)[0]) =>
+        showPnlValues ? d.pnl : d.balance;
 
       const ctm = svg.getScreenCTM();
       if (!ctm) return;
@@ -1573,32 +1611,47 @@ function PerformanceChart({
           ? filteredData[left]
           : filteredData[right];
 
+      const closestValue = getValue(closest);
+
       const x =
         padding.left +
         ((closest.timestamp - minTime) / timeRangeMs) * chartWidth;
       const y =
         padding.top +
         chartHeight -
-        ((closest.balance - adjustedMin) / range) * chartHeight;
+        ((closestValue - adjustedMin) / range) * chartHeight;
 
-      const changeFromStart = closest.balance - startBalance;
-      const pctChange =
-        startBalance > 0 ? (changeFromStart / startBalance) * 100 : 0;
+      const changeFromStart = closestValue - startValue;
+      const pctChange = showPnlValues
+        ? 0
+        : startValue > 0
+          ? (changeFromStart / startValue) * 100
+          : 0;
 
       setHoverData({
         x,
         y,
-        balance: closest.balance,
+        value: closestValue,
         timestamp: closest.timestamp,
         percentChange: pctChange,
       });
+      // Notify parent of hover state
+      onHover?.({ pnl: closest.pnl, timestamp: closest.timestamp });
     },
-    [filteredData, chartMetrics, chartWidth, chartHeight],
+    [
+      filteredData,
+      chartMetrics,
+      chartWidth,
+      chartHeight,
+      showPnlValues,
+      onHover,
+    ],
   );
 
   const handleMouseLeave = useCallback(() => {
     setHoverData(null);
-  }, []);
+    onHover?.(null);
+  }, [onHover]);
 
   // No data state
   // if (!chartMetrics.hasData) {
@@ -1618,8 +1671,8 @@ function PerformanceChart({
   // }
 
   const {
-    currentBalance,
-    startBalance,
+    currentValue,
+    startValue,
     totalChange,
     percentChange,
     isPositive,
@@ -1654,10 +1707,8 @@ function PerformanceChart({
   };
 
   // Display values
-  const displayBalance = hoverData ? hoverData.balance : currentBalance;
-  const displayChange = hoverData
-    ? hoverData.balance - startBalance
-    : totalChange;
+  const displayValue = hoverData ? hoverData.value : currentValue;
+  const displayChange = hoverData ? hoverData.value - startValue : totalChange;
   const displayPercent = hoverData ? hoverData.percentChange : percentChange;
   const displayPositive = displayChange >= 0;
   const displayColor = displayPositive ? "#00c853" : "#ff5252";
@@ -1666,16 +1717,18 @@ function PerformanceChart({
   if (!hasData) {
     return (
       <div className="space-y-1">
-        <div className="px-1 mb-4">
-          <div className="text-[32px] font-medium tracking-tight text-white">
-            {formatCurrency(startingBalance)}
+        {!hideTimeControls && (
+          <div className="px-1 mb-4">
+            <div className="text-[32px] font-medium tracking-tight text-white">
+              {showPnlValues ? "$0.00" : formatCurrency(startingBalance)}
+            </div>
+            <div className="flex items-center gap-2 text-[15px] text-white/40">
+              <span>+$0.00</span>
+              {!showPnlValues && <span>(0.00%)</span>}
+              <span className="text-white/30 text-xs">No data</span>
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-[15px] text-white/40">
-            <span>+$0.00</span>
-            <span>(0.00%)</span>
-            <span className="text-white/30 text-xs">No trades yet</span>
-          </div>
-        </div>
+        )}
         <div className="relative h-[180px] flex items-center justify-center bg-white/[0.02] rounded">
           <div className="text-center">
             <svg
@@ -1692,17 +1745,21 @@ function PerformanceChart({
               />
             </svg>
             <p className="text-white/30 text-sm">
-              Performance chart will appear here
+              {showPnlValues
+                ? "No P&L data available"
+                : "Performance chart will appear here"}
             </p>
             <p className="text-white/20 text-xs mt-1">
-              Start trading to see your progress
+              {showPnlValues
+                ? "Try a different time range"
+                : "Start trading to see your progress"}
             </p>
           </div>
         </div>
-        {/* Time range buttons - disabled state */}
-        <div className="flex items-center justify-center gap-0 pt-2">
-          {(["1D", "1W", "1M", "3M", "1Y", "ALL"] as TimeRange[]).map(
-            (range) => (
+        {/* Time range buttons - disabled state (hidden when externally controlled) */}
+        {/* {!hideTimeControls && (
+          <div className="flex items-center justify-center gap-0 pt-2">
+            {(["1D", "1W", "1M", "ALL"] as TimeRange[]).map((range) => (
               <button
                 key={range}
                 disabled
@@ -1710,42 +1767,48 @@ function PerformanceChart({
               >
                 {range}
               </button>
-            ),
-          )}
-        </div>
+            ))}
+          </div>
+        )} */}
       </div>
     );
   }
 
   return (
     <div className="space-y-1">
-      {/* Balance display - Robinhood style */}
-      <div className="px-1 mb-4">
-        <div
-          className="text-[32px] font-medium tracking-tight transition-colors duration-150"
-          style={{ color: "white" }}
-        >
-          {formatCurrency(displayBalance)}
+      {/* Value display - Robinhood style (shows PnL or Balance) */}
+      {/* {!hideTimeControls && (
+        <div className="px-1 mb-4">
+          <div
+            className="text-[32px] font-medium tracking-tight transition-colors duration-150"
+            style={{ color: showPnlValues ? displayColor : "white" }}
+          >
+            {showPnlValues
+              ? `${displayValue >= 0 ? "+" : ""}${formatCurrency(displayValue)}`
+              : formatCurrency(displayValue)}
+          </div>
+          <div
+            className="flex items-center gap-2 text-[15px]"
+            style={{ color: displayColor }}
+          >
+            <span>{formatChange(displayChange)}</span>
+            {!showPnlValues && (
+              <span style={{ color: "rgba(255,255,255,0.5)" }}>
+                ({formatPercent(displayPercent)})
+              </span>
+            )}
+            {hoverData ? (
+              <span className="text-white/40 text-xs">
+                {formatTime(hoverData.timestamp)}
+              </span>
+            ) : (
+              <span className="text-white/30 text-xs">
+                {timeRange === "ALL" ? "All time" : timeRange}
+              </span>
+            )}
+          </div>
         </div>
-        <div
-          className="flex items-center gap-2 text-[15px]"
-          style={{ color: displayColor }}
-        >
-          <span>{formatChange(displayChange)}</span>
-          <span style={{ color: "rgba(255,255,255,0.5)" }}>
-            ({formatPercent(displayPercent)})
-          </span>
-          {hoverData ? (
-            <span className="text-white/40 text-xs">
-              {formatTime(hoverData.timestamp)}
-            </span>
-          ) : (
-            <span className="text-white/30 text-xs">
-              {timeRange === "ALL" ? "All time" : timeRange}
-            </span>
-          )}
-        </div>
-      </div>
+      )} */}
 
       {/* Chart - Clean Robinhood style */}
 
@@ -1800,23 +1863,25 @@ function PerformanceChart({
         </svg>
       </div>
 
-      {/* Time range buttons - Robinhood style */}
-      <div className="flex items-center justify-center gap-0 pt-2">
-        {(["1D", "1W", "1M", "3M", "1Y", "ALL"] as TimeRange[]).map((range) => (
-          <button
-            key={range}
-            onClick={() => setTimeRange(range)}
-            className={`px-4 py-2 text-[13px] font-medium transition-all ${
-              timeRange === range
-                ? "text-white"
-                : "text-white/40 hover:text-white/60"
-            }`}
-            style={timeRange === range ? { color: lineColor } : undefined}
-          >
-            {range}
-          </button>
-        ))}
-      </div>
+      {/* Time range buttons - Robinhood style (hidden when externally controlled) */}
+      {/* {!hideTimeControls && (
+        <div className="flex items-center justify-center gap-0 pt-2">
+          {(["1D", "1W", "1M", "ALL"] as TimeRange[]).map((range) => (
+            <button
+              key={range}
+              onClick={() => setTimeRange(range)}
+              className={`px-4 py-2 text-[13px] font-medium transition-all ${
+                timeRange === range
+                  ? "text-white"
+                  : "text-white/40 hover:text-white/60"
+              }`}
+              style={timeRange === range ? { color: lineColor } : undefined}
+            >
+              {range}
+            </button>
+          ))}
+        </div>
+      )} */}
     </div>
   );
 }
@@ -2063,7 +2128,13 @@ function PortfolioView({
       if (result?.success) {
         // Optimistic update - immediately remove from UI
         onOptimisticUpdate?.(tokenId);
-        onSell(); // Refresh data in background
+
+        // Immediate refresh
+        onSell();
+
+        // Additional delayed refreshes to catch blockchain propagation
+        setTimeout(() => onSell(), 2000); // 2 seconds
+        setTimeout(() => onSell(), 5000); // 5 seconds
       } else {
         console.error("Redeem failed:", result?.error);
       }
@@ -2421,6 +2492,37 @@ function PositionRowWithSell({
 //   );
 // }
 
+// PnL time range options for Polymarket API
+type PnlTimeRange = "1d" | "1w" | "1m" | "all";
+const PNL_TIME_RANGES: { value: PnlTimeRange; label: string }[] = [
+  { value: "1d", label: "1D" },
+  { value: "1w", label: "1W" },
+  { value: "1m", label: "1M" },
+
+  { value: "all", label: "All" },
+];
+
+// Type for Polymarket closed positions API response
+interface ClosedPositionFromApi {
+  proxyWallet: string;
+  asset: string;
+  conditionId: string;
+  avgPrice: number;
+  totalBought: number;
+  realizedPnl: number;
+  curPrice: number;
+  title: string;
+  slug: string;
+  icon: string;
+  eventSlug: string;
+  outcome: string;
+  outcomeIndex: number;
+  oppositeOutcome: string;
+  oppositeAsset: string;
+  endDate: string;
+  timestamp: number;
+}
+
 // ========== Performance View ==========
 function PerformanceView({
   stats,
@@ -2437,6 +2539,25 @@ function PerformanceView({
   const [chartHistory, setChartHistory] = useState<
     { timestamp: number; pnl: number; balance: number }[]
   >([]);
+
+  // Polymarket closed positions API state
+  const [apiClosedPositions, setApiClosedPositions] = useState<
+    ClosedPositionFromApi[]
+  >([]);
+  const [closedPositionsLoading, setClosedPositionsLoading] = useState(true); // Start loading
+
+  // Polymarket PnL API state
+  const [pnlTimeRange, setPnlTimeRange] = useState<PnlTimeRange>("1m");
+  const [polymarketPnl, setPolymarketPnl] = useState<
+    { timestamp: number; pnl: number; balance: number }[]
+  >([]); // Empty array instead of null - keeps API mode active
+  const [pnlLoading, setPnlLoading] = useState(true); // Start loading
+  const [pnlError, setPnlError] = useState<string | null>(null);
+  const [apiDataFetched, setApiDataFetched] = useState(false); // Track if we've attempted API fetch
+  const [chartHoverData, setChartHoverData] = useState<{
+    pnl: number;
+    timestamp: number;
+  } | null>(null);
 
   // Fetch live unrealized P&L - reduced frequency to prevent lag
   useEffect(() => {
@@ -2464,7 +2585,175 @@ function PerformanceView({
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch chart history (periodic snapshots)
+  // Helper to parse API data
+  const parseApiData = useCallback(
+    (data: Array<{ t: number; p: number }>) => {
+      return data
+        .map((point: any) => {
+          const timestamp = point.t
+            ? point.t < 1e12
+              ? point.t * 1000 // Convert seconds to ms
+              : point.t
+            : null;
+          const pnl =
+            point.p !== undefined
+              ? parseFloat(point.p)
+              : point.pnl !== undefined
+                ? parseFloat(point.pnl)
+                : null;
+
+          if (timestamp && pnl !== null && !isNaN(pnl)) {
+            return {
+              timestamp,
+              pnl,
+              balance: (stats?.startingBalance || 0) + pnl,
+            };
+          }
+          return null;
+        })
+        .filter(Boolean) as {
+        timestamp: number;
+        pnl: number;
+        balance: number;
+      }[];
+    },
+    [stats?.startingBalance],
+  );
+
+  // Create a flat line at 0 for when there's no data
+  const createFlatLine = useCallback(() => {
+    const now = Date.now();
+    return [
+      {
+        timestamp: now - 24 * 60 * 60 * 1000,
+        pnl: 0,
+        balance: stats?.startingBalance || 0,
+      },
+      { timestamp: now, pnl: 0, balance: stats?.startingBalance || 0 },
+    ];
+  }, [stats?.startingBalance]);
+
+  // Fetch PnL data from Polymarket API
+  // Simple strategy: fetch the exact interval requested from the API
+  // Each time range (1d, 1w, 1m, all) has its own API endpoint data
+  useEffect(() => {
+    const fetchPolymarketPnl = async () => {
+      setPnlLoading(true);
+      setPnlError(null);
+
+      try {
+        // Fetch the exact interval from the API
+        console.log(`[PnL] Fetching data for interval: ${pnlTimeRange}`);
+
+        const result = await window.ipc?.invoke<{
+          data: Array<{ t: number; p: number }>;
+          address: string;
+          signatureType: number;
+          interval: string;
+          fidelity: string;
+        }>("polymarket:getMyPnl", {
+          interval: pnlTimeRange,
+        });
+
+        if (
+          result &&
+          result.data &&
+          Array.isArray(result.data) &&
+          result.data.length > 0
+        ) {
+          console.log(
+            `[PnL] Raw API response: interval=${result.interval}, fidelity=${result.fidelity}, points=${result.data.length}`,
+          );
+
+          // Log first and last raw timestamps for debugging
+          if (result.data.length > 0) {
+            const firstRaw = result.data[0];
+            const lastRaw = result.data[result.data.length - 1];
+            console.log(
+              `[PnL] Raw timestamps - first: t=${firstRaw.t} (${new Date(firstRaw.t * 1000).toISOString()}), last: t=${lastRaw.t} (${new Date(lastRaw.t * 1000).toISOString()})`,
+            );
+          }
+
+          const chartData = parseApiData(result.data);
+          console.log(
+            `[PnL] Parsed ${chartData.length} data points for ${pnlTimeRange}`,
+          );
+
+          // Log the date range for debugging
+          if (chartData.length > 0) {
+            const firstDate = new Date(chartData[0].timestamp);
+            const lastDate = new Date(
+              chartData[chartData.length - 1].timestamp,
+            );
+            console.log(
+              `[PnL] Date range: ${firstDate.toLocaleString()} to ${lastDate.toLocaleString()}`,
+            );
+          }
+
+          if (chartData.length > 0) {
+            setPolymarketPnl(chartData);
+          } else {
+            setPolymarketPnl(createFlatLine());
+          }
+          setApiDataFetched(true);
+          setPnlError(null);
+        } else {
+          // No data from API - show flat line
+          console.log(
+            `[PnL] No API data for ${pnlTimeRange}, creating flat line`,
+          );
+          setPolymarketPnl(createFlatLine());
+          setApiDataFetched(true);
+          setPnlError(null);
+        }
+      } catch (e) {
+        console.error("Failed to fetch Polymarket PnL:", e);
+        setPolymarketPnl(createFlatLine());
+        setApiDataFetched(true);
+        setPnlError(null);
+      } finally {
+        setPnlLoading(false);
+      }
+    };
+
+    fetchPolymarketPnl();
+  }, [pnlTimeRange, parseApiData, createFlatLine]);
+
+  // Fetch closed positions from Polymarket API
+  useEffect(() => {
+    const fetchClosedPositions = async () => {
+      setClosedPositionsLoading(true);
+      try {
+        const result = await window.ipc?.invoke<{
+          positions: ClosedPositionFromApi[];
+          total: number;
+          address: string;
+        }>("polymarket:getClosedPositions", {
+          sortBy: "timestamp",
+          sortDirection: "DESC",
+          limit: 100,
+        });
+
+        if (result?.positions && Array.isArray(result.positions)) {
+          console.log(
+            `[ClosedPositions] Fetched ${result.positions.length} positions`,
+          );
+          setApiClosedPositions(result.positions);
+        }
+      } catch (e) {
+        console.error("Failed to fetch closed positions:", e);
+      } finally {
+        setClosedPositionsLoading(false);
+      }
+    };
+
+    fetchClosedPositions();
+    // Refresh every 2 minutes
+    const interval = setInterval(fetchClosedPositions, 120000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Fetch local chart history (periodic snapshots) as fallback
   useEffect(() => {
     const fetchHistory = async () => {
       try {
@@ -2481,7 +2770,7 @@ function PerformanceView({
     };
 
     fetchHistory();
-    // Refresh history every 60 seconds (increased from 30s)
+    // Refresh history every 60 seconds
     const interval = setInterval(fetchHistory, 60000);
     return () => clearInterval(interval);
   }, []);
@@ -2512,45 +2801,50 @@ function PerformanceView({
     );
   };
 
-  // Combine chart history with current live point - with downsampling
+  // Chart data from Polymarket API only
   const chartData = useMemo(() => {
     if (!stats) return [];
 
-    // Start with historical snapshots
-    let points: { timestamp: number; pnl: number; balance: number }[] = [];
+    // Always use Polymarket API data
+    if (polymarketPnl.length === 0) {
+      // Return empty array - chart will show loading/no data state
+      return [];
+    }
 
-    if (chartHistory.length > 0) {
-      // Use chart history (periodic snapshots)
-      chartHistory.forEach((snapshot) => {
-        points.push({
-          timestamp: snapshot.timestamp,
-          pnl: snapshot.pnl,
-          balance: snapshot.balance,
-        });
-      });
-    } else if (trades.length > 0) {
-      // Fallback to trade-based chart if no history
-      const sortedTrades = [...trades].sort(
-        (a, b) => a.timestamp - b.timestamp,
-      );
-      let cumPnl = 0;
+    let points = [...polymarketPnl];
 
-      points.push({
-        timestamp: sortedTrades[0].timestamp,
-        pnl: 0,
-        balance: stats.startingBalance,
-      });
+    // Apply client-side time filtering if API returns too much data
+    // This ensures the chart shows only the selected time range
+    const now = Date.now();
+    const timeRanges: Record<PnlTimeRange, number> = {
+      "1d": 24 * 60 * 60 * 1000, // 24 hours
+      "1w": 7 * 24 * 60 * 60 * 1000, // 7 days
+      "1m": 30 * 24 * 60 * 60 * 1000, // 30 days
+      all: Infinity, // No limit
+    };
 
-      sortedTrades.forEach((trade) => {
-        if (trade.pnl !== undefined) {
-          cumPnl += trade.pnl;
-          points.push({
-            timestamp: trade.timestamp,
-            pnl: cumPnl,
-            balance: stats.startingBalance + cumPnl,
-          });
-        }
-      });
+    const cutoffTime = now - timeRanges[pnlTimeRange];
+    console.log(
+      `[ChartData] Time range: ${pnlTimeRange}, Cutoff: ${new Date(cutoffTime).toLocaleString()}`,
+    );
+    console.log(
+      `[ChartData] Raw points: ${points.length}, First: ${points[0] ? new Date(points[0].timestamp).toLocaleString() : "none"}`,
+    );
+
+    if (pnlTimeRange !== "all" && points.length > 0) {
+      // Filter to only include points within the selected time range
+      const filtered = points.filter((p) => p.timestamp >= cutoffTime);
+      console.log(`[ChartData] After filter: ${filtered.length} points`);
+
+      // If we have filtered data, use it; otherwise keep at least some points
+      if (filtered.length >= 2) {
+        points = filtered;
+      } else if (points.length >= 2) {
+        // If filtering left us with too few points, take the last portion of data
+        // that fits the time range, or at least 2 points
+        console.log(`[ChartData] Too few points after filter, using fallback`);
+        points = points.slice(-Math.max(2, Math.ceil(points.length * 0.1)));
+      }
     }
 
     // Downsample if too many points (keep max 150 for performance)
@@ -2558,39 +2852,76 @@ function PerformanceView({
     if (points.length > MAX_POINTS) {
       const step = Math.ceil(points.length / MAX_POINTS);
       const downsampled: typeof points = [];
-      // Always keep first point
       downsampled.push(points[0]);
-      // Sample intermediate points
       for (let i = step; i < points.length - 1; i += step) {
         downsampled.push(points[i]);
       }
-      // Always keep last point
       if (points.length > 1) {
         downsampled.push(points[points.length - 1]);
       }
       points = downsampled;
     }
 
-    // Add current point with live unrealized P&L
-    const realizedPnl = stats.realizedPnl || 0;
-    const totalPnl = realizedPnl + liveUnrealizedPnl;
+    return points;
+  }, [stats, polymarketPnl, pnlTimeRange]);
 
-    // Only add if different from last point (threshold $0.50) or no points
-    const lastPoint = points[points.length - 1];
-    if (
-      !lastPoint ||
-      Math.abs(lastPoint.pnl - totalPnl) > 0.5 ||
-      Date.now() - lastPoint.timestamp > 60000
-    ) {
-      points.push({
-        timestamp: Date.now(),
-        pnl: totalPnl,
-        balance: stats.startingBalance + totalPnl,
-      });
+  // Calculate stats from API closed positions
+  // (Must be before early return to follow hooks rules)
+  const apiStats = useMemo(() => {
+    if (apiClosedPositions.length === 0) {
+      return null;
     }
 
-    return points;
-  }, [trades, stats, liveUnrealizedPnl, chartHistory]);
+    const totalRealizedPnl = apiClosedPositions.reduce(
+      (sum, pos) => sum + pos.realizedPnl,
+      0,
+    );
+    const totalVolume = apiClosedPositions.reduce(
+      (sum, pos) => sum + pos.totalBought,
+      0,
+    );
+    const wins = apiClosedPositions.filter((pos) => pos.realizedPnl > 0);
+    const losses = apiClosedPositions.filter((pos) => pos.realizedPnl < 0);
+    const winRate =
+      apiClosedPositions.length > 0
+        ? wins.length / apiClosedPositions.length
+        : 0;
+
+    const totalWinAmount = wins.reduce((sum, pos) => sum + pos.realizedPnl, 0);
+    const totalLossAmount = Math.abs(
+      losses.reduce((sum, pos) => sum + pos.realizedPnl, 0),
+    );
+    const avgWin = wins.length > 0 ? totalWinAmount / wins.length : 0;
+    const avgLoss = losses.length > 0 ? totalLossAmount / losses.length : 0;
+    const profitFactor =
+      totalLossAmount > 0
+        ? totalWinAmount / totalLossAmount
+        : totalWinAmount > 0
+          ? Infinity
+          : 0;
+
+    const pnlValues = apiClosedPositions.map((p) => p.realizedPnl);
+    const largestWin = Math.max(0, ...pnlValues);
+    const largestLoss = Math.min(0, ...pnlValues);
+
+    return {
+      totalRealizedPnl,
+      totalVolume,
+      totalTrades: apiClosedPositions.length,
+      winningTrades: wins.length,
+      losingTrades: losses.length,
+      winRate,
+      avgWin,
+      avgLoss,
+      profitFactor,
+      largestWin,
+      largestLoss: Math.abs(largestLoss),
+      avgTradeSize:
+        apiClosedPositions.length > 0
+          ? totalVolume / apiClosedPositions.length
+          : 0,
+    };
+  }, [apiClosedPositions]);
 
   if (!stats) {
     return (
@@ -2602,41 +2933,280 @@ function PerformanceView({
     );
   }
 
-  // Calculate accurate total return including unrealized PnL
+  // Calculate accurate total return including unrealized PnL (all-time)
   const totalPnlWithUnrealized = (stats?.realizedPnl || 0) + liveUnrealizedPnl;
   const accurateReturn =
     stats?.startingBalance > 0
       ? (totalPnlWithUnrealized / stats.startingBalance) * 100
       : 0;
 
+  // Calculate period-specific PnL from the filtered chart data
+  // This shows the change in PnL during the selected time period
+  const periodPnl = useMemo(() => {
+    // Need at least 2 data points to calculate period change
+    if (chartData.length < 2) {
+      return null;
+    }
+    const firstPoint = chartData[0];
+    const lastPoint = chartData[chartData.length - 1];
+    // Period PnL = change from first to last point in the period
+    const change = lastPoint.pnl - firstPoint.pnl;
+    // Current total PnL (from last point)
+    const currentPnl = lastPoint.pnl;
+
+    // Debug logging
+    console.log(`[PnL Display] Range: ${pnlTimeRange}`);
+    console.log(`[PnL Display] Chart data points: ${chartData.length}`);
+    console.log(
+      `[PnL Display] First point: ${new Date(firstPoint.timestamp).toLocaleString()}, PnL: $${firstPoint.pnl.toFixed(2)}`,
+    );
+    console.log(
+      `[PnL Display] Last point: ${new Date(lastPoint.timestamp).toLocaleString()}, PnL: $${lastPoint.pnl.toFixed(2)}`,
+    );
+    console.log(
+      `[PnL Display] Period change: $${change.toFixed(2)}, Current total: $${currentPnl.toFixed(2)}`,
+    );
+
+    return {
+      change, // PnL change during this period
+      currentPnl, // Current total PnL
+      startPnl: firstPoint.pnl, // PnL at start of period
+    };
+  }, [chartData, pnlTimeRange]);
+
+  // Format period label for display
+  const periodLabel = useMemo(() => {
+    const labels: Record<PnlTimeRange, string> = {
+      "1d": "24h",
+      "1w": "7d",
+      "1m": "30d",
+
+      all: "All Time",
+    };
+    return labels[pnlTimeRange];
+  }, [pnlTimeRange]);
+
+  // Format timestamp for hover display
+  const formatHoverTime = (ts: number) => {
+    const d = new Date(ts);
+    return d.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  // Determine what PnL value to display based on hover state and time range
+  // Display logic:
+  // - When NOT hovering: Show period change for 1D/1W/1M, or total cumulative for ALL
+  // - When hovering: Show the cumulative PnL at that point (what `p` represents)
+  //   AND show the change from period start to that point
+  const displayPnl = useMemo(() => {
+    // If hovering, show cumulative PnL at cursor AND change from period start
+    if (chartHoverData && chartData.length > 0) {
+      const firstPoint = chartData[0];
+      const changeFromStart = chartHoverData.pnl - firstPoint.pnl;
+
+      // For ALL time, just show cumulative; for periods, show change from start of period
+      if (pnlTimeRange === "all") {
+        return {
+          value: chartHoverData.pnl, // Cumulative PnL at this point
+          label: formatHoverTime(chartHoverData.timestamp),
+          isHovering: true,
+        };
+      } else {
+        return {
+          value: changeFromStart, // Change from period start to hover point
+          label: formatHoverTime(chartHoverData.timestamp),
+          isHovering: true,
+        };
+      }
+    }
+
+    // Not hovering - show based on time range (always API mode)
+    if (periodPnl) {
+      if (pnlTimeRange === "all") {
+        // For ALL time: show total cumulative PnL
+        return {
+          value: periodPnl.currentPnl,
+          label: "All Time",
+          isHovering: false,
+        };
+      } else {
+        // For other time ranges: show only the period change
+        return {
+          value: periodPnl.change,
+          label: periodLabel,
+          isHovering: false,
+        };
+      }
+    }
+
+    // No data yet - will show loading state
+    return null;
+  }, [chartHoverData, chartData, periodPnl, pnlTimeRange, periodLabel]);
+
   return (
     <div className="space-y-4">
-      {/* Performance Graph - Robinhood style */}
+      {/* Performance Graph - Robinhood style with Polymarket API */}
       <div className="panel">
-        <div className="p-4">
-          <PerformanceChart
-            data={chartData}
-            startingBalance={stats.startingBalance}
-          />
+        {/* Header with PnL display and time range selector */}
+        <div className="px-4 pt-4 pb-2">
+          {/* Top row: Current PnL and time selector */}
+          <div className="flex items-start justify-between mb-3">
+            <div>
+              {/* Show PnL based on hover state and time range - Always API mode */}
+              {displayPnl ? (
+                <>
+                  <p
+                    className={`text-2xl font-semibold tabular-nums ${
+                      displayPnl.value >= 0
+                        ? "text-emerald-400"
+                        : "text-rose-400"
+                    }`}
+                  >
+                    {displayPnl.value >= 0 ? "+" : ""}$
+                    {Math.abs(displayPnl.value).toFixed(2)}
+                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-xs text-white/40">
+                      {displayPnl.label}
+                    </span>
+                    {pnlLoading && !displayPnl.isHovering && (
+                      <div className="w-3 h-3 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-2xl font-semibold text-white/40 tabular-nums">
+                    --
+                  </p>
+                  <p className="text-xs text-white/40 mt-1">
+                    {pnlLoading
+                      ? "Loading..."
+                      : pnlError || "No data for this period"}
+                  </p>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {/* Data source toggle */}
+              {/* Time range selector */}
+              <div className="flex items-center bg-white/5 rounded p-0.5">
+                {PNL_TIME_RANGES.map((range) => (
+                  <button
+                    key={range.value}
+                    onClick={() => setPnlTimeRange(range.value)}
+                    className={`px-2.5 py-1 text-[11px] font-medium rounded transition-colors ${
+                      pnlTimeRange === range.value
+                        ? "bg-emerald-500/20 text-emerald-400"
+                        : "text-white/50 hover:text-white/80"
+                    }`}
+                  >
+                    {range.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="px-4 pb-4">
+          {pnlLoading && chartData.length === 0 ? (
+            <div className="h-[200px] flex items-center justify-center">
+              <div className="flex flex-col items-center gap-2">
+                <div className="w-6 h-6 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+                <span className="text-sm text-white/40">
+                  Loading chart data...
+                </span>
+              </div>
+            </div>
+          ) : (
+            <PerformanceChart
+              data={chartData}
+              startingBalance={stats.startingBalance}
+              hideTimeControls={true}
+              showPnlValues={true}
+              onHover={setChartHoverData}
+            />
+          )}
         </div>
       </div>
 
-      {/* Performance summary */}
+      {/* Performance summary - Always API mode */}
       <div className="grid grid-cols-2 @[600px]:grid-cols-4 @[900px]:grid-cols-6 gap-3">
-        <StatCard
-          label="Total Return"
-          value={`${accurateReturn >= 0 ? "+" : ""}${accurateReturn.toFixed(2)}%`}
-          color={accurateReturn >= 0 ? "text-emerald-400" : "text-rose-400"}
-        />
-        <StatCard
-          label="Total PnL"
-          value={`${totalPnlWithUnrealized >= 0 ? "+" : ""}$${totalPnlWithUnrealized.toFixed(
-            2,
-          )}`}
-          color={
-            totalPnlWithUnrealized >= 0 ? "text-emerald-400" : "text-rose-400"
-          }
-        />
+        {periodPnl ? (
+          <>
+            {/* For "all" time: show total PnL. For other periods: show period change */}
+            <StatCard
+              label={
+                pnlTimeRange === "all" ? "Total PnL" : `${periodLabel} Change`
+              }
+              value={`${(pnlTimeRange === "all" ? periodPnl.currentPnl : periodPnl.change) >= 0 ? "+" : ""}$${Math.abs(pnlTimeRange === "all" ? periodPnl.currentPnl : periodPnl.change).toFixed(2)}`}
+              color={
+                (pnlTimeRange === "all"
+                  ? periodPnl.currentPnl
+                  : periodPnl.change) >= 0
+                  ? "text-emerald-400"
+                  : "text-rose-400"
+              }
+            />
+            {/* Only show Total PnL card for non-"all" ranges */}
+            {pnlTimeRange !== "all" && (
+              <StatCard
+                label="Total PnL"
+                value={`${periodPnl.currentPnl >= 0 ? "+" : ""}$${Math.abs(periodPnl.currentPnl).toFixed(2)}`}
+                color={
+                  periodPnl.currentPnl >= 0
+                    ? "text-emerald-400"
+                    : "text-rose-400"
+                }
+              />
+            )}
+            {/* Show API-derived Total Realized PnL */}
+            {apiStats && (
+              <StatCard
+                label="API Realized PnL"
+                value={`${apiStats.totalRealizedPnl >= 0 ? "+" : ""}$${Math.abs(apiStats.totalRealizedPnl).toFixed(2)}`}
+                color={
+                  apiStats.totalRealizedPnl >= 0
+                    ? "text-emerald-400"
+                    : "text-rose-400"
+                }
+              />
+            )}
+          </>
+        ) : (
+          <>
+            {/* Loading state - waiting for API data */}
+            <StatCard
+              label={
+                pnlTimeRange === "all" ? "Total PnL" : `${periodLabel} Change`
+              }
+              value={pnlLoading ? "..." : "--"}
+              color="text-white/40"
+            />
+            {pnlTimeRange !== "all" && (
+              <StatCard
+                label="Total PnL"
+                value={pnlLoading ? "..." : "--"}
+                color="text-white/40"
+              />
+            )}
+            {apiStats && (
+              <StatCard
+                label="API Realized PnL"
+                value={`${apiStats.totalRealizedPnl >= 0 ? "+" : ""}$${Math.abs(apiStats.totalRealizedPnl).toFixed(2)}`}
+                color={
+                  apiStats.totalRealizedPnl >= 0
+                    ? "text-emerald-400"
+                    : "text-rose-400"
+                }
+              />
+            )}
+          </>
+        )}
         <StatCard
           label="Starting Balance"
           value={`$${stats.startingBalance.toFixed(2)}`}
@@ -2649,7 +3219,7 @@ function PerformanceView({
         />
         <StatCard
           label="Total Volume"
-          value={`$${stats.totalVolume.toFixed(2)}`}
+          value={`$${(apiStats ? apiStats.totalVolume : stats.totalVolume).toFixed(2)}`}
           color="text-white/60"
         />
         <StatCard
@@ -2659,64 +3229,76 @@ function PerformanceView({
         />
       </div>
 
-      {/* Win/Loss stats */}
+      {/* Win/Loss stats - Always use API stats */}
       <div className="grid grid-cols-2 @[600px]:grid-cols-4 @[900px]:grid-cols-6 gap-3">
         <StatCard
           label="Total Trades"
-          value={String(stats.totalTrades)}
+          value={String(apiStats ? apiStats.totalTrades : stats.totalTrades)}
           color="text-white"
         />
         <StatCard
           label="Winning Trades"
-          value={String(stats.winningTrades)}
+          value={String(
+            apiStats ? apiStats.winningTrades : stats.winningTrades,
+          )}
           color="text-emerald-400"
         />
         <StatCard
           label="Losing Trades"
-          value={String(stats.losingTrades)}
+          value={String(apiStats ? apiStats.losingTrades : stats.losingTrades)}
           color="text-rose-400"
         />
         <StatCard
           label="Win Rate"
-          value={`${(stats.winRate * 100).toFixed(1)}%`}
-          color={stats.winRate >= 0.5 ? "text-emerald-400" : "text-amber-400"}
+          value={`${((apiStats ? apiStats.winRate : stats.winRate) * 100).toFixed(1)}%`}
+          color={
+            (apiStats ? apiStats.winRate : stats.winRate) >= 0.5
+              ? "text-emerald-400"
+              : "text-amber-400"
+          }
         />
         <StatCard
           label="Profit Factor"
           value={
-            stats.profitFactor === Infinity
+            (apiStats ? apiStats.profitFactor : stats.profitFactor) === Infinity
               ? "∞"
-              : stats.profitFactor.toFixed(2)
+              : (apiStats ? apiStats.profitFactor : stats.profitFactor).toFixed(
+                  2,
+                )
           }
-          color={stats.profitFactor >= 1 ? "text-emerald-400" : "text-rose-400"}
+          color={
+            (apiStats ? apiStats.profitFactor : stats.profitFactor) >= 1
+              ? "text-emerald-400"
+              : "text-rose-400"
+          }
         />
         <StatCard
           label="Avg Trade Size"
-          value={`$${stats.avgTradeSize.toFixed(2)}`}
+          value={`$${(apiStats ? apiStats.avgTradeSize : stats.avgTradeSize).toFixed(2)}`}
           color="text-white/60"
         />
       </div>
 
-      {/* Best/Worst */}
+      {/* Best/Worst - Always use API stats */}
       <div className="grid grid-cols-2 @[600px]:grid-cols-4 gap-3">
         <StatCard
           label="Largest Win"
-          value={`+$${stats.largestWin.toFixed(2)}`}
+          value={`+$${(apiStats ? apiStats.largestWin : stats.largestWin).toFixed(2)}`}
           color="text-emerald-400"
         />
         <StatCard
           label="Largest Loss"
-          value={`$${stats.largestLoss.toFixed(2)}`}
+          value={`$${(apiStats ? apiStats.largestLoss : stats.largestLoss).toFixed(2)}`}
           color="text-rose-400"
         />
         <StatCard
           label="Avg Win"
-          value={`+$${stats.avgWin.toFixed(2)}`}
+          value={`+$${(apiStats ? apiStats.avgWin : stats.avgWin).toFixed(2)}`}
           color="text-emerald-400"
         />
         <StatCard
           label="Avg Loss"
-          value={`-$${stats.avgLoss.toFixed(2)}`}
+          value={`-$${(apiStats ? apiStats.avgLoss : stats.avgLoss).toFixed(2)}`}
           color="text-rose-400"
         />
       </div>
@@ -2724,10 +3306,21 @@ function PerformanceView({
       {/* Trade history */}
       <div className="panel">
         <div className="panel-header">
-          <p className="panel-title">Trade History</p>
-          <span className="text-sm text-white/40">{trades.length} trades</span>
+          <div className="flex items-center gap-2">
+            <p className="panel-title">Trade History</p>
+            {closedPositionsLoading && (
+              <div className="w-3 h-3 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-white/40">
+              {apiClosedPositions.length} trades
+            </span>
+          </div>
         </div>
-        {trades.length === 0 ? (
+
+        {/* API Trade History - Always shown */}
+        {apiClosedPositions.length === 0 ? (
           <div className="px-5 py-16 text-center">
             <svg
               className="w-12 h-12 mx-auto text-white/20 mb-4"
@@ -2742,9 +3335,13 @@ function PerformanceView({
                 d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z"
               />
             </svg>
-            <p className="text-white/40">No trades yet</p>
+            <p className="text-white/40">
+              {closedPositionsLoading
+                ? "Loading trade history..."
+                : "No closed positions yet"}
+            </p>
             <p className="text-white/30 text-sm mt-1">
-              Trade history will appear here
+              Closed positions from Polymarket will appear here
             </p>
           </div>
         ) : (
@@ -2763,17 +3360,12 @@ function PerformanceView({
               <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
                 <div className="w-10 @[400px]:w-12 @[500px]:w-14 text-center">
                   <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
-                    Side
-                  </span>
-                </div>
-                <div className="hidden @[350px]:flex w-8 @[400px]:w-10 justify-center">
-                  <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
                     Bet
                   </span>
                 </div>
                 <div className="hidden @[450px]:flex w-12 @[500px]:w-14 justify-end">
                   <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
-                    Shares
+                    Price
                   </span>
                 </div>
                 <div className="w-12 @[400px]:w-14 @[500px]:w-16 text-right">
@@ -2781,9 +3373,9 @@ function PerformanceView({
                     Value
                   </span>
                 </div>
-                <div className="hidden @[500px]:flex w-14 @[600px]:w-16 justify-end">
+                <div className="hidden @[500px]:flex w-14 @[600px]:w-16 justify-center">
                   <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
-                    Price
+                    Result
                   </span>
                 </div>
                 <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
@@ -2794,11 +3386,10 @@ function PerformanceView({
               </div>
             </div>
             <div className="divide-y divide-white/[0.04] max-h-[500px] overflow-y-auto">
-              {trades.map((trade, idx) => (
-                <TradeHistoryRow
-                  key={`${trade.id}-${trade.timestamp}-${idx}`}
-                  trade={trade}
-                  formatTime={formatTime}
+              {apiClosedPositions.map((position, idx) => (
+                <ApiClosedPositionRow
+                  key={`${position.conditionId}-${position.timestamp}-${idx}`}
+                  position={position}
                 />
               ))}
             </div>
@@ -2806,46 +3397,7 @@ function PerformanceView({
         )}
       </div>
 
-      {/* Closed Positions */}
-      {/* {closedPositions.length > 0 && (
-        <div className="panel">
-          <div className="panel-header">
-            <p className="panel-title">Closed Positions</p>
-            <span className="text-sm text-white/40">
-              {closedPositions.length} realized
-            </span>
-          </div>
-          <div className="@container flex items-center px-3 @[400px]:px-4 py-2 border-b border-white/[0.06] bg-white/[0.02]">
-            <div className="flex-1 min-w-0 mr-2 @[400px]:mr-3 @[500px]:mr-4">
-              <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
-                Market
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
-              <div className="w-8 @[400px]:w-10 flex items-center justify-center">
-                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
-                  Bet
-                </span>
-              </div>
-              <div className="hidden @[350px]:flex w-12 @[400px]:w-14 items-center justify-center">
-                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
-                  Status
-                </span>
-              </div>
-              <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
-                <span className="text-[10px] @[400px]:text-[11px] font-medium text-white/30 uppercase tracking-wider">
-                  PnL
-                </span>
-              </div>
-            </div>
-          </div>
-          <div className="divide-y divide-white/[0.04] max-h-[300px] overflow-y-auto">
-            {closedPositions.slice(0, 20).map((pos, idx) => (
-              <ClosedPositionRow key={idx} position={pos} />
-            ))}
-          </div>
-        </div>
-      )} */}
+      {/* Closed Positions - old section removed, now using API data above */}
     </div>
   );
 }
@@ -2982,6 +3534,140 @@ function TradeHistoryRow({
             {hasPnl
               ? `${trade.pnl! >= 0 ? "+" : ""}${formatValue(trade.pnl!)}`
               : "—"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Component for displaying closed positions from Polymarket API
+function ApiClosedPositionRow({
+  position,
+}: {
+  position: ClosedPositionFromApi;
+}) {
+  const isWin = position.realizedPnl >= 0;
+  const pnlColor = isWin ? "text-emerald-400" : "text-rose-400";
+
+  // Format relative time
+  const getRelativeTime = (ts: number) => {
+    const now = Date.now();
+    // API returns timestamp in seconds, convert to ms
+    const timestamp = ts < 1e12 ? ts * 1000 : ts;
+    const diff = now - timestamp;
+    const mins = Math.floor(diff / 60000);
+    const hrs = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    if (mins < 1) return "now";
+    if (mins < 60) return `${mins}m`;
+    if (hrs < 24) return `${hrs}h`;
+    if (days < 7) return `${days}d`;
+    return new Date(timestamp).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  // Format value compactly
+  const formatValue = (val: number) => {
+    if (Math.abs(val) >= 1000) return `$${(val / 1000).toFixed(1)}K`;
+    return `$${val.toFixed(2)}`;
+  };
+
+  // Extract short market name from title
+  const getShortMarketName = (title: string) => {
+    // For crypto up/down markets, extract the key info
+
+    return title;
+  };
+
+  return (
+    <div className="@container group flex items-center px-3 @[400px]:px-4 py-2.5 @[400px]:py-3 hover:bg-white/[0.03] transition-colors border-b border-white/[0.04] last:border-0">
+      {/* Time */}
+      <div className="w-10 @[400px]:w-12 @[500px]:w-14 flex-shrink-0 mr-2 @[400px]:mr-3">
+        <span className="text-[10px] @[400px]:text-[11px] @[500px]:text-[12px] font-medium text-white/45 tabular-nums">
+          {getRelativeTime(position.timestamp)}
+        </span>
+      </div>
+
+      {/* Market image and name */}
+      <div className="flex-1 min-w-0 flex items-center mr-2 @[400px]:mr-3 @[500px]:mr-4">
+        {position.icon && (
+          <div className="flex-shrink-0 mr-2 @[400px]:mr-2.5">
+            <img
+              src={position.icon}
+              alt=""
+              className="w-6 h-6 @[400px]:w-7 @[400px]:h-7 rounded-full object-cover bg-white/10"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] @[400px]:text-[12px] @[500px]:text-[13px] font-medium text-white/85 truncate leading-tight">
+            {getShortMarketName(position.title)}
+          </p>
+          {/* <p className="text-[9px] @[400px]:text-[10px] text-white/40 truncate">
+            {position.outcome}
+          </p> */}
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="flex items-center gap-1.5 @[400px]:gap-2 @[500px]:gap-3">
+        {/* Outcome/Bet */}
+        <div className="w-10 @[400px]:w-12 @[500px]:w-14 flex items-center justify-center">
+          <span
+            className={`text-[9px] @[400px]:text-[10px] @[500px]:text-[11px] font-bold uppercase px-1.5 @[400px]:px-2 py-0.5 rounded ${
+              position.outcome.toLowerCase() === "yes" ||
+              position.outcome.toLowerCase() === "up"
+                ? "bg-emerald-500/20 text-emerald-400"
+                : position.outcome.toLowerCase() === "no" ||
+                    position.outcome.toLowerCase() === "down"
+                  ? "bg-rose-500/20 text-rose-400"
+                  : "bg-white/10 text-white/70"
+            }`}
+          >
+            {position.outcome}
+          </span>
+        </div>
+
+        {/* Avg Price */}
+        <div className="hidden @[450px]:flex w-12 @[500px]:w-14 items-center justify-end">
+          <span className="text-[11px] @[500px]:text-[12px] font-medium text-white/70 tabular-nums">
+            {(position.avgPrice * 100).toFixed(1)}¢
+          </span>
+        </div>
+
+        {/* Total Bought */}
+        <div className="w-12 @[400px]:w-14 @[500px]:w-16 text-right">
+          <span className="text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums text-white/90">
+            {formatValue(position.totalBought)}
+          </span>
+        </div>
+
+        {/* Result */}
+        <div className="hidden @[500px]:flex w-14 @[600px]:w-16 items-center justify-center">
+          <span
+            className={`text-[9px] @[400px]:text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
+              position.curPrice === 1
+                ? "bg-emerald-500/20 text-emerald-400"
+                : "bg-rose-500/20 text-rose-400"
+            }`}
+          >
+            {position.curPrice === 1 ? "WON" : "LOST"}
+          </span>
+        </div>
+
+        {/* PnL */}
+        <div className="w-14 @[400px]:w-16 @[500px]:w-18 text-right">
+          <span
+            className={`text-[12px] @[400px]:text-[13px] @[500px]:text-[14px] font-semibold tabular-nums ${pnlColor}`}
+          >
+            {position.realizedPnl >= 0 ? "+" : ""}
+            {formatValue(position.realizedPnl)}
           </span>
         </div>
       </div>

@@ -945,85 +945,102 @@ export class ClobClientWrapper {
         `https://data-api.polymarket.com/positions?user=${walletAddress}&sortBy=CURRENT&sortDirection=DESC&sizeThreshold=0.1&limit=50&offset=0`,
         {
           headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Origin": "https://polymarket.com",
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            Accept: "application/json, text/plain, */*",
+            Origin: "https://polymarket.com",
           },
-        }
+        },
       );
 
       if (!response.ok) {
-        throw new Error(`Data API returned ${response.status}: ${response.statusText}`);
+        throw new Error(
+          `Data API returned ${response.status}: ${response.statusText}`,
+        );
       }
 
       const rawPositions = await response.json();
       logger.debug(`Data API returned ${rawPositions.length} positions`);
 
+      // Log first position to see available fields
+      if (rawPositions.length > 0) {
+        logger.debug(`Data API position sample fields: ${Object.keys(rawPositions[0]).join(", ")}`);
+        logger.debug(`Data API position sample: ${JSON.stringify(rawPositions[0]).substring(0, 500)}`);
+      }
+
       if (!Array.isArray(rawPositions) || rawPositions.length === 0) {
         return { positions: [], totalValue: 0, totalFees: 0 };
       }
 
-      // Collect token IDs for batch market info fetch
-      const tokenIds = rawPositions.map((p: any) => p.asset).filter(Boolean);
-
       // Batch fetch market info from Gamma API for resolved status and conditionId
-      const marketInfoMap = new Map<string, {
-        question?: string;
-        conditionId?: string;
-        umaResolutionStatus?: string; // "resolved" means market is resolved and redeemable
-        closed?: boolean;
-        tokenIndex?: number;
-      }>();
+      // The Data API returns proxyTicker/slug that we can use to fetch market info
+      const marketInfoMap = new Map<
+        string,
+        {
+          question?: string;
+          conditionId?: string;
+          umaResolutionStatus?: string; // "resolved" means market is resolved and redeemable
+          closed?: boolean;
+        }
+      >();
 
-      if (tokenIds.length > 0) {
+      // Fetch market info for each position individually by slug (more reliable)
+      const marketFetches = rawPositions.map(async (pos: any) => {
+        const slug = pos.proxyTicker || pos.slug || pos.marketSlug;
+        const tokenId = pos.asset;
+
+        if (!slug && !tokenId) return;
+
         try {
-          const gammaResponse = await fetch(
-            `https://gamma-api.polymarket.com/markets?clob_token_ids=${tokenIds.join(",")}`,
-          );
-          if (gammaResponse.ok) {
-            const markets = await gammaResponse.json();
-            for (const market of markets) {
-              // clobTokenIds can be a JSON string or array - parse if string
-              let clobTokenIds: string[] = [];
-              if (typeof market.clobTokenIds === "string") {
-                try {
-                  clobTokenIds = JSON.parse(market.clobTokenIds);
-                } catch {
-                  clobTokenIds = [];
-                }
-              } else if (Array.isArray(market.clobTokenIds)) {
-                clobTokenIds = market.clobTokenIds;
-              }
+          // Try by slug first (more reliable)
+          let url = slug
+            ? `https://gamma-api.polymarket.com/markets/slug/${slug}`
+            : `https://gamma-api.polymarket.com/markets?clob_token_ids=${tokenId}`;
 
-              for (let i = 0; i < clobTokenIds.length; i++) {
-                const tid = clobTokenIds[i];
-                marketInfoMap.set(tid, {
-                  question: market.question || market.title,
-                  conditionId: market.conditionId,
-                  umaResolutionStatus: market.umaResolutionStatus, // "resolved" = can redeem
-                  closed: market.closed === true || String(market.closed) === "true",
-                  tokenIndex: i,
-                });
-              }
+          const marketRes = await fetch(url);
+          if (marketRes.ok) {
+            const marketData = await marketRes.json();
+            // If querying by clob_token_ids, result is an array
+            const market = Array.isArray(marketData) ? marketData[0] : marketData;
 
-              logger.debug(`Gamma API: market=${market.question?.substring(0, 30)}..., umaResolutionStatus=${market.umaResolutionStatus}, conditionId=${market.conditionId?.substring(0, 16)}...`);
+            if (market) {
+              marketInfoMap.set(tokenId, {
+                question: market.question || market.title,
+                conditionId: market.conditionId,
+                umaResolutionStatus: market.umaResolutionStatus,
+                closed: market.closed === true || String(market.closed) === "true",
+              });
+
+              logger.debug(
+                `Market info for ${tokenId.substring(0, 16)}...: umaResolutionStatus=${market.umaResolutionStatus}, closed=${market.closed}`
+              );
             }
           }
-        } catch (marketError) {
-          logger.debug(`Failed to fetch market info: ${(marketError as Error).message}`);
+        } catch (e) {
+          logger.debug(`Failed to fetch market info for ${tokenId?.substring(0, 16)}: ${(e as Error).message}`);
         }
-      }
+      });
+
+      // Wait for all market info fetches (with timeout)
+      await Promise.race([
+        Promise.all(marketFetches),
+        new Promise(resolve => setTimeout(resolve, 10000)) // 10 second timeout
+      ]);
 
       // Log resolved markets for debugging
       let resolvedCount = 0;
       for (const [tokenId, info] of marketInfoMap) {
         if (info.umaResolutionStatus === "resolved") {
           resolvedCount++;
-          logger.info(`Resolved market detected: ${tokenId.substring(0, 16)}... status=${info.umaResolutionStatus}, conditionId=${info.conditionId?.substring(0, 16)}...`);
+          logger.info(
+            `Resolved market detected: ${tokenId.substring(0, 16)}... status=${info.umaResolutionStatus}, conditionId=${info.conditionId?.substring(0, 16)}...`,
+          );
         }
       }
       if (resolvedCount > 0) {
-        logger.info(`Found ${resolvedCount} resolved market(s) - should show Redeem button`);
+        logger.info(
+          `Found ${resolvedCount} resolved market(s) - should show Redeem button`,
+        );
       }
 
       // Map positions to our format
@@ -1056,14 +1073,17 @@ export class ClobClientWrapper {
 
         // Get market info from Gamma API
         const marketInfo = marketInfoMap.get(tokenId);
-        const marketName = marketInfo?.question || pos.title || pos.market || "Unknown Market";
+        const marketName =
+          marketInfo?.question || pos.title || pos.market || "Unknown Market";
         const conditionId = marketInfo?.conditionId || pos.conditionId;
         // Market is resolved when umaResolutionStatus === "resolved" (not just closed)
         const isResolved = marketInfo?.umaResolutionStatus === "resolved";
         const isRedeemable = isResolved && !!conditionId;
 
         // Determine outcome from position data
-        const outcome = pos.outcome || (pos.side === "YES" ? "Yes" : pos.side === "NO" ? "No" : "Yes");
+        const outcome =
+          pos.outcome ||
+          (pos.side === "YES" ? "Yes" : pos.side === "NO" ? "No" : "Yes");
 
         logger.debug(
           `Position: ${tokenId.substring(0, 16)}... shares=${shares.toFixed(2)}, price=${currentPrice.toFixed(3)}, resolved=${isResolved}`,
@@ -1086,7 +1106,9 @@ export class ClobClientWrapper {
         totalValue += currentValue;
       }
 
-      logger.info(`Found ${positions.length} open positions, total value: $${totalValue.toFixed(2)}`);
+      logger.info(
+        `Found ${positions.length} open positions, total value: $${totalValue.toFixed(2)}`,
+      );
 
       return { positions, totalValue, totalFees };
     } catch (error) {
@@ -1172,16 +1194,21 @@ export class ClobClientWrapper {
       }
 
       // Filter to positions with shares > 0
-      const openPositions = Array.from(positionMap.values()).filter(p => p.shares >= 0.01);
+      const openPositions = Array.from(positionMap.values()).filter(
+        (p) => p.shares >= 0.01,
+      );
 
       // Batch fetch market info
-      const tokenIds = openPositions.map(p => p.tokenId);
-      const marketInfoMap = new Map<string, {
-        question?: string;
-        conditionId?: string;
-        umaResolutionStatus?: string;
-        currentPrice?: number;
-      }>();
+      const tokenIds = openPositions.map((p) => p.tokenId);
+      const marketInfoMap = new Map<
+        string,
+        {
+          question?: string;
+          conditionId?: string;
+          umaResolutionStatus?: string;
+          currentPrice?: number;
+        }
+      >();
 
       if (tokenIds.length > 0) {
         try {
@@ -1207,7 +1234,9 @@ export class ClobClientWrapper {
               let outcomePrices: number[] = [];
               if (typeof market.outcomePrices === "string") {
                 try {
-                  outcomePrices = JSON.parse(market.outcomePrices).map((p: string) => parseFloat(p) || 0);
+                  outcomePrices = JSON.parse(market.outcomePrices).map(
+                    (p: string) => parseFloat(p) || 0,
+                  );
                 } catch {
                   outcomePrices = [];
                 }
@@ -1273,7 +1302,9 @@ export class ClobClientWrapper {
         totalFees += pos.totalFees;
       }
 
-      logger.info(`Fallback: Found ${positions.length} positions, total value: $${totalValue.toFixed(2)}`);
+      logger.info(
+        `Fallback: Found ${positions.length} positions, total value: $${totalValue.toFixed(2)}`,
+      );
       return { positions, totalValue, totalFees };
     } catch (error) {
       logger.error("Failed to get positions from trade history", {
@@ -1379,6 +1410,23 @@ export class ClobClientWrapper {
   }
 
   /**
+   * Clear balance cache - useful after redeem/sell to force fresh balance fetch
+   */
+  clearBalanceCache(): void {
+    this.balanceCache = null;
+    logger.debug("Balance cache cleared");
+  }
+
+  /**
+   * Clear all caches (positions + balance) - useful after redeem
+   */
+  clearAllCaches(): void {
+    this.clearPositionCaches();
+    this.clearBalanceCache();
+    logger.debug("All caches cleared");
+  }
+
+  /**
    * Remove a specific token from closed cache (e.g., if user buys back in)
    */
   invalidatePositionCache(tokenId: string): void {
@@ -1403,14 +1451,18 @@ export class MarketWebSocket {
   private ws: any = null;
   private WebSocketLib: any = null;
   private subscribedMarkets: Set<string> = new Set();
-  private priceCallbacks: Map<string, (price: { bid: number; ask: number; lastPrice: number }) => void> = new Map();
+  private priceCallbacks: Map<
+    string,
+    (price: { bid: number; ask: number; lastPrice: number }) => void
+  > = new Map();
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
   private pingInterval: NodeJS.Timeout | null = null;
   private isConnecting = false;
 
-  private readonly WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
+  private readonly WS_URL =
+    "wss://ws-subscriptions-clob.polymarket.com/ws/market";
 
   /**
    * Connect to the WebSocket server
@@ -1481,7 +1533,10 @@ export class MarketWebSocket {
   /**
    * Subscribe to a market for real-time price updates
    */
-  subscribe(tokenId: string, callback: (price: { bid: number; ask: number; lastPrice: number }) => void): void {
+  subscribe(
+    tokenId: string,
+    callback: (price: { bid: number; ask: number; lastPrice: number }) => void,
+  ): void {
     this.subscribedMarkets.add(tokenId);
     this.priceCallbacks.set(tokenId, callback);
 
@@ -1551,7 +1606,8 @@ export class MarketWebSocket {
         callback({
           bid: parseFloat(change.best_bid) || 0,
           ask: parseFloat(change.best_ask) || 0,
-          lastPrice: parseFloat(change.price) || parseFloat(change.best_bid) || 0,
+          lastPrice:
+            parseFloat(change.price) || parseFloat(change.best_bid) || 0,
         });
       }
     }
@@ -1623,7 +1679,9 @@ export class MarketWebSocket {
     this.reconnectAttempts++;
     const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
 
-    logger.info(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+    logger.info(
+      `Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`,
+    );
 
     setTimeout(() => {
       this.connect().catch(() => {});
@@ -1697,7 +1755,8 @@ export class UserChannelWebSocket {
   private onOrder: ((order: OrderUpdate) => void) | null = null;
   private onPositionChange: (() => void) | null = null;
 
-  private readonly WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/user";
+  private readonly WS_URL =
+    "wss://ws-subscriptions-clob.polymarket.com/ws/user";
 
   /**
    * Initialize with API credentials
@@ -1714,7 +1773,7 @@ export class UserChannelWebSocket {
   setCallbacks(
     onTrade: (trade: TradeUpdate) => void,
     onOrder: (order: OrderUpdate) => void,
-    onPositionChange: () => void
+    onPositionChange: () => void,
   ): void {
     this.onTrade = onTrade;
     this.onOrder = onOrder;
@@ -1767,7 +1826,9 @@ export class UserChannelWebSocket {
         };
 
         this.ws.onerror = (error: any) => {
-          logger.error("User Channel WebSocket error", { error: error.message });
+          logger.error("User Channel WebSocket error", {
+            error: error.message,
+          });
           this.isConnecting = false;
         };
 
@@ -1779,7 +1840,9 @@ export class UserChannelWebSocket {
         };
       } catch (e: any) {
         this.isConnecting = false;
-        logger.error("Failed to create User Channel WebSocket", { error: e.message });
+        logger.error("Failed to create User Channel WebSocket", {
+          error: e.message,
+        });
         reject(e);
       }
     });
@@ -1797,7 +1860,10 @@ export class UserChannelWebSocket {
     // Create HMAC signature for authentication
     const crypto = require("crypto");
     const message = timestamp + "GET" + "/ws/user";
-    const hmac = crypto.createHmac("sha256", Buffer.from(this.apiSecret, "base64"));
+    const hmac = crypto.createHmac(
+      "sha256",
+      Buffer.from(this.apiSecret, "base64"),
+    );
     hmac.update(message);
     const signature = hmac.digest("base64");
 
@@ -1858,7 +1924,9 @@ export class UserChannelWebSocket {
       tradeId: data.id,
     };
 
-    logger.info(`User Channel: Trade ${trade.side} ${trade.size} @ ${trade.price} (${trade.status})`);
+    logger.info(
+      `User Channel: Trade ${trade.side} ${trade.size} @ ${trade.price} (${trade.status})`,
+    );
 
     if (this.onTrade) {
       this.onTrade(trade);
@@ -1889,7 +1957,9 @@ export class UserChannelWebSocket {
       timestamp: parseInt(data.timestamp) * 1000 || Date.now(),
     };
 
-    logger.info(`User Channel: Order ${order.type} - ${order.side} ${order.originalSize} @ ${order.price}`);
+    logger.info(
+      `User Channel: Order ${order.type} - ${order.side} ${order.originalSize} @ ${order.price}`,
+    );
 
     if (this.onOrder) {
       this.onOrder(order);
@@ -1935,7 +2005,9 @@ export class UserChannelWebSocket {
     this.reconnectAttempts++;
     const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
 
-    logger.info(`User Channel: Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+    logger.info(
+      `User Channel: Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`,
+    );
 
     setTimeout(() => {
       this.connect().catch(() => {});

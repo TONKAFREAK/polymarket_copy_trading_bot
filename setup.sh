@@ -1,59 +1,60 @@
 #!/bin/bash
 
-# Polymarket Copy Trading Bot - Setup Script
-# This script installs all dependencies and builds the project
+# Polymarket Copy Trading Bot - Setup Script (Mac/Linux)
 
 set -e
 
-echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║   Polymarket Copy Trading Bot - Setup                         ║"
-echo "╚════════════════════════════════════════════════════════════════╝"
+echo ""
+echo "========================================"
+echo "  PMcopy - Setup"
+echo "========================================"
 echo ""
 
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then
-    echo "❌ Node.js is not installed. Please install Node.js 18+ from https://nodejs.org"
+    echo "[ERROR] Node.js is not installed."
+    echo "Please install Node.js 18+ from https://nodejs.org"
     exit 1
 fi
 
-echo "✓ Node.js version: $(node --version)"
-echo "✓ npm version: $(npm --version)"
+echo "[OK] Node.js version: $(node --version)"
+echo "[OK] npm version: $(npm --version)"
 echo ""
 
-# Install root dependencies
-echo "📦 Installing root dependencies..."
+# Install root dependencies (CLI)
+echo "[1/4] Installing CLI dependencies..."
 npm install
-echo "✓ Root dependencies installed"
+echo "[OK] CLI dependencies installed"
 echo ""
 
-# Install client dependencies
-echo "📦 Installing client dependencies..."
+# Install client dependencies (Desktop App)
+echo "[2/4] Installing Desktop App dependencies..."
 cd client
 npm install
 cd ..
-echo "✓ Client dependencies installed"
+echo "[OK] Desktop App dependencies installed"
 echo ""
 
-# Build root project
-echo "🔨 Building root project (TypeScript)..."
+# Build CLI
+echo "[3/4] Building CLI..."
 npm run build
-echo "✓ Root project built"
+echo "[OK] CLI built"
 echo ""
 
-# Build client
-echo "🔨 Building client (Next.js + Electron)..."
-cd client
-npm run build
-cd ..
-echo "✓ Client built"
+# Create .env if not exists
+echo "[4/4] Checking configuration..."
+if [ ! -f .env ] && [ -f .env.example ]; then
+    cp .env.example .env
+    echo "[OK] Created .env from .env.example"
+fi
 echo ""
 
-echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║   ✓ Setup Complete!                                           ║"
-echo "╚════════════════════════════════════════════════════════════════╝"
+echo "========================================"
+echo "  Setup Complete!"
+echo "========================================"
 echo ""
 echo "Next steps:"
-echo "  1. Copy .env.example to .env and fill in your API keys"
-echo "  2. Run 'npm run dev-desktop' to start the desktop app"
-echo "  3. Or run 'npm run dev-cli' to use the CLI"
+echo "  1. Edit .env with your Polymarket API credentials"
+echo "  2. Run 'npm run client' to start the Desktop App"
+echo "  3. Run 'npm run cli' to start the CLI Bot"
 echo ""

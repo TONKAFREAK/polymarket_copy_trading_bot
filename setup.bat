@@ -1,87 +1,82 @@
 @echo off
 REM Polymarket Copy Trading Bot - Setup Script (Windows)
-REM This script installs all dependencies and builds the project
 
 setlocal enabledelayedexpansion
 
 echo.
-echo ╔════════════════════════════════════════════════════════════════╗
-echo ║   Polymarket Copy Trading Bot - Setup                         ║
-echo ╚════════════════════════════════════════════════════════════════╝
+echo ========================================
+echo   PMcopy - Setup
+echo ========================================
 echo.
 
 REM Check if Node.js is installed
 node --version >nul 2>&1
 if errorlevel 1 (
-    echo ❌ Node.js is not installed.
+    echo [ERROR] Node.js is not installed.
     echo Please install Node.js 18+ from https://nodejs.org
     pause
     exit /b 1
 )
 
-echo ✓ Node.js version:
+echo [OK] Node.js version:
 node --version
-echo ✓ npm version:
+echo [OK] npm version:
 npm --version
 echo.
 
-REM Install root dependencies
-echo 📦 Installing root dependencies...
+REM Install root dependencies (CLI)
+echo [1/4] Installing CLI dependencies...
 call npm install
 if errorlevel 1 (
-    echo ❌ Failed to install root dependencies
+    echo [ERROR] Failed to install CLI dependencies
     pause
     exit /b 1
 )
-echo ✓ Root dependencies installed
+echo [OK] CLI dependencies installed
 echo.
 
-REM Install client dependencies
-echo 📦 Installing client dependencies...
+REM Install client dependencies (Desktop App)
+echo [2/4] Installing Desktop App dependencies...
 cd client
 call npm install
 if errorlevel 1 (
-    echo ❌ Failed to install client dependencies
+    echo [ERROR] Failed to install Desktop App dependencies
     cd ..
     pause
     exit /b 1
 )
 cd ..
-echo ✓ Client dependencies installed
+echo [OK] Desktop App dependencies installed
 echo.
 
-REM Build root project
-echo 🔨 Building root project (TypeScript)...
+REM Build CLI
+echo [3/4] Building CLI...
 call npm run build
 if errorlevel 1 (
-    echo ❌ Failed to build root project
+    echo [ERROR] Failed to build CLI
     pause
     exit /b 1
 )
-echo ✓ Root project built
+echo [OK] CLI built
 echo.
 
-REM Build client
-echo 🔨 Building client (Next.js + Electron)...
-cd client
-call npm run build
-if errorlevel 1 (
-    echo ❌ Failed to build client
-    cd ..
-    pause
-    exit /b 1
+REM Create .env if not exists
+echo [4/4] Checking configuration...
+if not exist .env (
+    if exist .env.example (
+        copy .env.example .env >nul
+        echo [OK] Created .env from .env.example
+    )
 )
-cd ..
-echo ✓ Client built
 echo.
 
-echo ╔════════════════════════════════════════════════════════════════╗
-echo ║   ✓ Setup Complete!                                           ║
-echo ╚════════════════════════════════════════════════════════════════╝
+echo ========================================
+echo   Setup Complete!
+echo ========================================
 echo.
 echo Next steps:
-echo   1. Copy .env.example to .env and fill in your API keys
-echo   2. Run 'npm run dev-desktop' to start the desktop app
-echo   3. Or run 'npm run dev-cli' to use the CLI
+echo   1. Edit .env with your Polymarket API credentials
+echo   2. Run 'npm run client' to start the Desktop App
+echo   3. Run 'npm run cli' to start the CLI Bot
 echo.
 pause

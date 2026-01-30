@@ -1,36 +1,37 @@
 @echo off
 REM Polymarket Copy Trading Bot - Development Script (Windows)
-REM Run the app in development mode
 
 echo.
-echo ╔════════════════════════════════════════════════════════════════╗
-echo ║   Polymarket Copy Trading Bot - Development                   ║
-echo ╚════════════════════════════════════════════════════════════════╝
+echo ========================================
+echo   PMcopy - Development
+echo ========================================
 echo.
 
 REM Check if .env file exists
 if not exist .env (
-    echo ⚠️  .env file not found!
-    echo Creating .env from .env.example...
-    copy .env.example .env
-    echo ✓ .env created - please fill in your API keys
+    echo [!] .env file not found
+    if exist .env.example (
+        copy .env.example .env >nul
+        echo [OK] Created .env from .env.example
+        echo [!] Please edit .env with your API credentials
+        echo.
+    )
 )
 
+echo Choose what to run:
+echo   1) Desktop App (Electron + React)
+echo   2) CLI Bot (Terminal)
 echo.
-echo Starting development mode...
-echo Choose which to run:
-echo   1) Desktop App (Electron + Next.js)
-echo   2) CLI Bot
-echo.
-set /p choice="Enter your choice (1 or 2): "
+set /p choice="Enter choice (1 or 2): "
 
 if "%choice%"=="1" (
+    echo.
     echo Starting Desktop App...
-    cd client
-    call npm run dev
+    npm run client
 ) else if "%choice%"=="2" (
+    echo.
     echo Starting CLI Bot...
-    call npm run dev
+    npm run cli
 ) else (
     echo Invalid choice
     pause

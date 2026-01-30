@@ -1,40 +1,40 @@
 #!/bin/bash
 
 # Polymarket Copy Trading Bot - Development Script (Mac/Linux)
-# Run the app in development mode
-
-set -e
 
 echo ""
-echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║   Polymarket Copy Trading Bot - Development                   ║"
-echo "╚════════════════════════════════════════════════════════════════╝"
+echo "========================================"
+echo "  PMcopy - Development"
+echo "========================================"
 echo ""
 
 # Check if .env file exists
 if [ ! -f .env ]; then
-    echo "⚠️  .env file not found!"
-    echo "Creating .env from .env.example..."
-    cp .env.example .env
-    echo "✓ .env created - please fill in your API keys"
-    echo ""
+    echo "[!] .env file not found"
+    if [ -f .env.example ]; then
+        cp .env.example .env
+        echo "[OK] Created .env from .env.example"
+        echo "[!] Please edit .env with your API credentials"
+        echo ""
+    fi
 fi
 
-echo "Choose which to run:"
-echo "  1) Desktop App (Electron + Next.js)"
-echo "  2) CLI Bot"
+echo "Choose what to run:"
+echo "  1) Desktop App (Electron + React)"
+echo "  2) CLI Bot (Terminal)"
 echo ""
-read -p "Enter your choice (1 or 2): " choice
+read -p "Enter choice (1 or 2): " choice
 
 case $choice in
     1)
+        echo ""
         echo "Starting Desktop App..."
-        cd client
-        npm run dev
+        npm run client
         ;;
     2)
+        echo ""
         echo "Starting CLI Bot..."
-        npm run dev
+        npm run cli
         ;;
     *)
         echo "Invalid choice"

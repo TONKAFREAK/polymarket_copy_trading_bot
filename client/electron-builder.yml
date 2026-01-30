@@ -17,12 +17,21 @@ extraResources:
 publish: null
 win:
   target:
-    - target: dir
+    - target: nsis
+      arch: x64
+    - target: portable
       arch: x64
   icon: resources/icon.ico
   requestedExecutionLevel: asInvoker
-  rfc3161TimeStampServer: null
-  signAndEditExecutable: false
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: resources/icon.ico
+  uninstallerIcon: resources/icon.ico
+  installerHeaderIcon: resources/icon.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: PMcopy
 mac:
   target: dmg
   icon: resources/icon.icns

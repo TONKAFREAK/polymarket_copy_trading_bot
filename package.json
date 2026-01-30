@@ -1,27 +1,37 @@
 {
   "name": "polymarket-copy-trader",
   "version": "1.0.0",
-  "description": "CLI copy-trading bot for Polymarket using CLOB API",
+  "description": "Polymarket copy-trading bot - CLI and Desktop App",
   "main": "dist/cli.js",
   "bin": {
     "pmcopy": "./dist/cli.js"
   },
   "scripts": {
+    "cli": "tsx src/cli.ts",
+    "cli:build": "tsc",
+    "cli:start": "node dist/cli.js",
+    "client": "cd client && npm run dev",
+    "client:build": "cd client && npm run build",
+    "client:install": "cd client && npm install",
     "build": "tsc",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "clean": "rimraf dist",
     "lint": "eslint src/**/*.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "install:all": "npm install && cd client && npm install",
+    "postinstall": "echo Run 'npm run client:install' to install client dependencies"
   },
   "keywords": [
     "polymarket",
     "trading",
     "copy-trading",
     "clob",
-    "prediction-markets"
+    "prediction-markets",
+    "electron",
+    "desktop-app"
   ],
-  "author": "",
+  "author": "TONKAFREAK",
   "license": "MIT",
   "dependencies": {
     "@polymarket/builder-signing-sdk": "^0.0.8",
